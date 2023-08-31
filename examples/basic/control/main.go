@@ -52,7 +52,7 @@ func main() {
 	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hi Baz!")), nil); err != nil {
 		log.Fatal(err)
 	}
-	time.Sleep(time.Millisecond)
+	time.Sleep(time.Millisecond) // explicit switch point
 	conn.Terminate()
 	<-closeCh
 	fmt.Printf("Control: Worker terminated\n")
