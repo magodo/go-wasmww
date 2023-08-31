@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"syscall/js"
 
 	"github.com/hack-pad/safejs"
@@ -10,8 +11,7 @@ import (
 )
 
 func main() {
-	closeCh := make(chan any)
-	self, err := wasmww.Self()
+	self, err := wasmww.SelfConn()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -19,38 +19,44 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	f, err := safejs.FuncOf(func(this safejs.Value, args []safejs.Value) any {
-		v, err := args[0].Get("data")
-		if err != nil {
-			fmt.Printf("Worker (%s): Error: %v\n", name, err)
-			return nil
-		}
-		str, err := v.String()
-		if err != nil {
-			fmt.Printf("Worker (%s): Error: %v\n", name, err)
-			return nil
-		}
-		fmt.Printf("Worker (%s): Received %q\n", name, str)
-		if str == "Close" {
-			close(closeCh)
-			return nil
-		}
-		if err := self.PostMessage(safejs.Safe(js.ValueOf(str)), nil); err != nil {
-			fmt.Printf("Worker (%s): Error: %v\n", name, err)
-			return nil
-		}
-		return nil
-	})
+
+	fmt.Printf("Worker (%s): Args: %v\n", name, os.Args)
+	fmt.Printf("Worker (%s): Env: %v\n", name, os.Environ())
+
+	ch, closeFn, err := self.SetupConn()
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := safejs.Global().Set("HandleMessage", f); err != nil {
-		log.Fatal(err)
+	defer func() {
+		if err := closeFn(); err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	for event := range ch {
+		data, err := event.Data()
+		if err != nil {
+			fmt.Printf("Worker (%s): Error: %v\n", name, err)
+			continue
+		}
+		str, err := data.String()
+		if err != nil {
+			fmt.Printf("Worker (%s): Error: %v\n", name, err)
+			continue
+		}
+		fmt.Printf("Worker (%s): Received %q\n", name, str)
+		if str == "Close" {
+			// cancel the context will close the channel from within the Listen()
+			closeFn()
+			fmt.Printf("Worker (%s): Close\n", name)
+			continue
+		}
+
+		// Echo back the message
+		if err := self.PostMessage(safejs.Safe(js.ValueOf(str)), nil); err != nil {
+			fmt.Printf("Worker (%s): Error: %v\n", name, err)
+			continue
+		}
 	}
-
-	<-closeCh
-
-	self.PostMessage(safejs.Safe(js.ValueOf(wasmww.CLOSE_EVENT)), nil)
-	fmt.Printf("Worker (%s): Close\n", name)
-	self.Close()
+	fmt.Printf("Worker (%s): Exit\n", name)
 }

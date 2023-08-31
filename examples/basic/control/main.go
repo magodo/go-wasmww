@@ -4,54 +4,69 @@ import (
 	"fmt"
 	"log"
 	"syscall/js"
+	"time"
 
 	"github.com/hack-pad/safejs"
 	"github.com/magodo/go-wasmww"
 )
 
 func main() {
-	ww := &wasmww.WASMWW{
+	conn := &wasmww.WasmWebWorkerConn{
 		Name: "hello",
 		Path: "hello.wasm",
 		Env: map[string]string{
 			"foo": "bar",
 		},
-		Args:   []string{"wasm", "arg"},
-		CbName: "HandleMessage",
+		Args: []string{"wasm", "arg"},
 	}
-	closeCh, err := spawnAndHandle(ww)
+	closeCh, err := spawnAndHandle(conn)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := ww.PostMessage(safejs.Safe(js.ValueOf("Hello World!")), nil); err != nil {
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hello Foo!")), nil); err != nil {
 		log.Fatal(err)
 	}
-	if err := ww.PostMessage(safejs.Safe(js.ValueOf("Close")), nil); err != nil {
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hello Bar!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hello Baz!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Close")), nil); err != nil {
 		log.Fatal(err)
 	}
 	<-closeCh
 	fmt.Printf("Control: Worker closed\n")
 
 	// Re-spwn
-	closeCh, err = spawnAndHandle(ww)
+	closeCh, err = spawnAndHandle(conn)
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := ww.PostMessage(safejs.Safe(js.ValueOf("Hello World!")), nil); err != nil {
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hi Foo!")), nil); err != nil {
 		log.Fatal(err)
 	}
-	ww.Terminate()
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hi Bar!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hi Baz!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	time.Sleep(time.Millisecond)
+	conn.Terminate()
 	<-closeCh
 	fmt.Printf("Control: Worker terminated\n")
+
+	time.Sleep(time.Millisecond)
 }
 
-func spawnAndHandle(ww *wasmww.WASMWW) (chan interface{}, error) {
-	if err := ww.Spawn(); err != nil {
+func spawnAndHandle(conn *wasmww.WasmWebWorkerConn) (chan interface{}, error) {
+	if err := conn.Start(); err != nil {
 		return nil, err
 	}
 	ch := make(chan interface{})
 	go func() {
-		for evt := range ww.EventCh() {
+		for evt := range conn.EventChannel() {
 			data, err := evt.Data()
 			if err != nil {
 				log.Fatal(err)
