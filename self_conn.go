@@ -37,7 +37,7 @@ func (s *GlobalSelfConn) SetupConn() (eventCh <-chan worker.MessageEvent, closeF
 	}
 
 	// Rewrite the writeSync JS function to make it not only log to console, but also postMessage to the controller.
-	writeSync := js.FuncOf(func(this js.Value, args []js.Value) any {
+	js.Global().Get("fs").Set("writeSync", js.FuncOf(func(this js.Value, args []js.Value) any {
 		jsConsole := js.Global().Get("console")
 		decoder := js.Global().Get("TextDecoder").New("utf-8")
 		fd, buf := args[0], args[1]
@@ -57,9 +57,7 @@ func (s *GlobalSelfConn) SetupConn() (eventCh <-chan worker.MessageEvent, closeF
 			outputBuffer = outputBuffer[nl+1:]
 		}
 		return buf.Get("length")
-	})
-	jsFS := js.Global().Get("fs")
-	jsFS.Set("writeSync", writeSync)
+	}))
 
 	// Notify the controller that this worker has started listening
 	if err := s.self.PostMessage(safejs.Null(), nil); err != nil {

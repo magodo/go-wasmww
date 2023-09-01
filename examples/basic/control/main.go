@@ -5,7 +5,9 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"log"
+	"sync"
 	"syscall/js"
 	"time"
 
@@ -89,6 +91,58 @@ func main() {
 ---
 `, stdout.String())
 	fmt.Printf(`Worker Stderr
+---
+%s
+---
+`, stderr.String())
+
+	//re-spawn and use Stdout/errPipe()
+	conn.Stdout = nil
+	conn.Stderr = nil
+	pipeOut, err := conn.StdoutPipe()
+	if err != nil {
+		log.Fatal(err)
+	}
+	pipeErr, err := conn.StderrPipe()
+	if err != nil {
+		log.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		io.Copy(&stdout, pipeOut)
+		wg.Done()
+	}()
+	go func() {
+		io.Copy(&stderr, pipeErr)
+		wg.Done()
+	}()
+
+	closeCh, err = spawnAndHandle(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Gutentag Foo!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Close")), nil); err != nil {
+		log.Fatal(err)
+	}
+
+	<-closeCh
+	fmt.Printf("Control: Worker closed\n")
+
+	wg.Wait()
+	fmt.Printf(`Worker Stdout (pipe)
+---
+%s
+---
+`, stdout.String())
+	fmt.Printf(`Worker Stderr (pipe)
 ---
 %s
 ---
