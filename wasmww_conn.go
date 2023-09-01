@@ -4,12 +4,16 @@ package wasmww
 
 import (
 	"context"
+	"io"
+	"strings"
 
 	"github.com/hack-pad/go-webworkers/worker"
 	"github.com/hack-pad/safejs"
 )
 
 const CLOSE_EVENT = "__WASMWW_CLOSE__"
+const STDOUT_EVENT = "__WASMWW_STDOUT__"
+const STDERR_EVENT = "__WASMWW_STDERR__"
 
 // WasmWebWorkerConn is a high level wrapper around the WasmWebWorker, which
 // provides a full duplex connection between the web worker.
@@ -19,6 +23,9 @@ type WasmWebWorkerConn struct {
 	Path string
 	Args []string
 	Env  map[string]string
+
+	Stdout io.Writer
+	Stderr io.Writer
 
 	ww        *WasmWebWorker
 	ctx       context.Context
@@ -60,6 +67,18 @@ func (conn *WasmWebWorkerConn) Start() error {
 					if str == CLOSE_EVENT {
 						conn.ctxCancel()
 						continue
+					}
+					if conn.Stdout != nil {
+						if strings.HasPrefix(str, STDOUT_EVENT) {
+							conn.Stdout.Write([]byte(str[len(STDOUT_EVENT):]))
+							continue
+						}
+					}
+					if conn.Stderr != nil {
+						if strings.HasPrefix(str, STDERR_EVENT) {
+							conn.Stderr.Write([]byte(str[len(STDERR_EVENT):]))
+							continue
+						}
 					}
 				}
 			}

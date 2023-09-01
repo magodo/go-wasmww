@@ -4,6 +4,8 @@ package wasmww
 
 import (
 	"context"
+	"strings"
+	"syscall/js"
 
 	"github.com/hack-pad/go-webworkers/worker"
 	"github.com/hack-pad/safejs"
@@ -33,6 +35,31 @@ func (s *GlobalSelfConn) SetupConn() (eventCh <-chan worker.MessageEvent, closeF
 		cancel()
 		return nil, nil, err
 	}
+
+	// Rewrite the writeSync JS function to make it not only log to console, but also postMessage to the controller.
+	writeSync := js.FuncOf(func(this js.Value, args []js.Value) any {
+		jsConsole := js.Global().Get("console")
+		decoder := js.Global().Get("TextDecoder").New("utf-8")
+		fd, buf := args[0], args[1]
+		var outputBuffer string
+		tmpBuf := decoder.Call("decode", buf).String()
+		outputBuffer += tmpBuf
+		nl := strings.LastIndex(outputBuffer, "\n")
+		if nl != -1 {
+			msg := outputBuffer[:nl]
+			jsConsole.Call("log", js.ValueOf(msg))
+			switch fd.Int() {
+			case 1:
+				s.PostMessage(safejs.Safe(js.ValueOf(STDOUT_EVENT+msg+"\n")), nil)
+			case 2:
+				s.PostMessage(safejs.Safe(js.ValueOf(STDOUT_EVENT+msg+"\n")), nil)
+			}
+			outputBuffer = outputBuffer[nl+1:]
+		}
+		return buf.Get("length")
+	})
+	jsFS := js.Global().Get("fs")
+	jsFS.Set("writeSync", writeSync)
 
 	// Notify the controller that this worker has started listening
 	if err := s.self.PostMessage(safejs.Null(), nil); err != nil {

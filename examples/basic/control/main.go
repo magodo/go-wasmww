@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"syscall/js"
@@ -13,13 +14,16 @@ import (
 )
 
 func main() {
+	var stdout, stderr bytes.Buffer
 	conn := &wasmww.WasmWebWorkerConn{
 		Name: "hello",
 		Path: "hello.wasm",
 		Env: map[string]string{
 			"foo": "bar",
 		},
-		Args: []string{"wasm", "arg"},
+		Args:   []string{"wasm", "arg"},
+		Stdout: &stdout,
+		Stderr: &stderr,
 	}
 	closeCh, err := spawnAndHandle(conn)
 	if err != nil {
@@ -59,7 +63,36 @@ func main() {
 	<-closeCh
 	fmt.Printf("Control: Worker terminated\n")
 
-	time.Sleep(time.Millisecond)
+	// re-spawn again
+	closeCh, err = spawnAndHandle(conn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hey Foo!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hey Bar!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hey Baz!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Close")), nil); err != nil {
+		log.Fatal(err)
+	}
+	<-closeCh
+	fmt.Printf("Control: Worker closed\n")
+
+	fmt.Printf(`Stdout
+---
+%s
+---
+`, stdout.String())
+	fmt.Printf(`Stderr
+---
+%s
+---
+`, stderr.String())
 }
 
 func spawnAndHandle(conn *wasmww.WasmWebWorkerConn) (chan interface{}, error) {
