@@ -52,7 +52,7 @@ func (s *GlobalSelfConn) SetupConn() (eventCh <-chan worker.MessageEvent, closeF
 			case 1:
 				s.PostMessage(safejs.Safe(js.ValueOf(STDOUT_EVENT+msg+"\n")), nil)
 			case 2:
-				s.PostMessage(safejs.Safe(js.ValueOf(STDOUT_EVENT+msg+"\n")), nil)
+				s.PostMessage(safejs.Safe(js.ValueOf(STDERR_EVENT+msg+"\n")), nil)
 			}
 			outputBuffer = outputBuffer[nl+1:]
 		}

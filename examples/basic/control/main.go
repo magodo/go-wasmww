@@ -83,12 +83,12 @@ func main() {
 	<-closeCh
 	fmt.Printf("Control: Worker closed\n")
 
-	fmt.Printf(`Stdout
+	fmt.Printf(`Worker Stdout
 ---
 %s
 ---
 `, stdout.String())
-	fmt.Printf(`Stderr
+	fmt.Printf(`Worker Stderr
 ---
 %s
 ---

@@ -22,13 +22,14 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Printf("Worker (%s): Args: %v\n", name, os.Args)
-	fmt.Printf("Worker (%s): Env: %v\n", name, os.Environ())
-
 	ch, closeFn, err := self.SetupConn()
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	log.Printf("Worker (%s): Args: %v\n", name, os.Args)
+	log.Printf("Worker (%s): Env: %v\n", name, os.Environ())
+
 	defer func() {
 		if err := closeFn(); err != nil {
 			log.Fatal(err)
@@ -60,5 +61,6 @@ func main() {
 			continue
 		}
 	}
+
 	fmt.Printf("Worker (%s): Exit\n", name)
 }

@@ -85,6 +85,7 @@ func (conn *WasmWebWorkerConn) Start() error {
 			eventCh <- event
 		}
 		close(eventCh)
+		conn.ww = nil
 	}()
 
 	conn.eventCh = eventCh
