@@ -57,14 +57,18 @@ func (ww *WasmWebWorker) Start() error {
 	return nil
 }
 
+// PostMessage sends data in a message to the worker, optionally transferring ownership of all items in transfers.
 func (ww *WasmWebWorker) PostMessage(data safejs.Value, transfers []safejs.Value) error {
 	return ww.worker.PostMessage(data, transfers)
 }
 
+// Terminate immediately terminates the Worker.
 func (ww *WasmWebWorker) Terminate() {
 	ww.worker.Terminate()
 }
 
+// Listen sends message events on a channel for events fired by self.postMessage() calls inside the Worker's global scope.
+// Stops the listener and closes the channel when ctx is canceled.
 func (ww *WasmWebWorker) Listen(ctx context.Context) (<-chan worker.MessageEvent, error) {
 	return ww.worker.Listen(ctx)
 }

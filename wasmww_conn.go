@@ -36,8 +36,11 @@ type WasmWebWorkerConn struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 	eventCh   chan worker.MessageEvent
+	closeCh   chan any
 }
 
+// Start starts a new Web Worker. It spins up a goroutine to receive the events from the Web Worker,
+// and exposes a channel for consuming those events, which can be accessed by the `EventChannel()` method.
 func (conn *WasmWebWorkerConn) Start() error {
 	ww := &WasmWebWorker{
 		Name: conn.Name,
@@ -65,6 +68,7 @@ func (conn *WasmWebWorkerConn) Start() error {
 	// Create a channel to relay the event from the onmessage channel to the consuming channel,
 	// except it will cancel the listening context and close the channel when the worker closes.
 	eventCh := make(chan worker.MessageEvent)
+	closeCh := make(chan any)
 	go func() {
 		for event := range rawCh {
 			if data, err := event.Data(); err == nil {
@@ -93,6 +97,7 @@ func (conn *WasmWebWorkerConn) Start() error {
 			}
 			eventCh <- event
 		}
+		close(closeCh)
 		close(eventCh)
 
 		for _, closer := range conn.pipes {
@@ -103,7 +108,13 @@ func (conn *WasmWebWorkerConn) Start() error {
 	}()
 
 	conn.eventCh = eventCh
+	conn.closeCh = closeCh
 	return nil
+}
+
+// Wait waits for the controler's internal event loop to quit. This can be caused by either worker closes itself, or controler calls `Terminate`.
+func (conn *WasmWebWorkerConn) Wait() {
+	<-conn.closeCh
 }
 
 // StdoutPipe returns a channel that will be connected to the worker's
@@ -150,15 +161,18 @@ func (conn *WasmWebWorkerConn) StderrPipe() (io.ReadCloser, error) {
 	return r, nil
 }
 
+// PostMessage sends data in a message to the worker, optionally transferring ownership of all items in transfers.
 func (conn *WasmWebWorkerConn) PostMessage(data safejs.Value, transfers []safejs.Value) error {
 	return conn.ww.PostMessage(data, transfers)
 }
 
+// Terminate immediately terminates the Worker. Meanwhile, it stops the internal event loop, which makes the `Wait` to return.
 func (conn *WasmWebWorkerConn) Terminate() {
 	conn.ww.Terminate()
 	conn.ctxCancel()
 }
 
+// EventChannel returns the channel that receives events sent from the Web Worker.
 func (conn *WasmWebWorkerConn) EventChannel() <-chan worker.MessageEvent {
 	return conn.eventCh
 }

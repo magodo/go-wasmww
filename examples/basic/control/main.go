@@ -27,8 +27,7 @@ func main() {
 		Stdout: &stdout,
 		Stderr: &stderr,
 	}
-	closeCh, err := spawnAndHandle(conn)
-	if err != nil {
+	if err := startHandle(conn); err != nil {
 		log.Fatal(err)
 	}
 	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hello Foo!")), nil); err != nil {
@@ -43,12 +42,11 @@ func main() {
 	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Close")), nil); err != nil {
 		log.Fatal(err)
 	}
-	<-closeCh
+	conn.Wait()
 	fmt.Printf("Control: Worker closed\n")
 
 	// Re-spwn
-	closeCh, err = spawnAndHandle(conn)
-	if err != nil {
+	if err := startHandle(conn); err != nil {
 		log.Fatal(err)
 	}
 	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hi Foo!")), nil); err != nil {
@@ -62,12 +60,11 @@ func main() {
 	}
 	time.Sleep(time.Millisecond) // explicit switch point
 	conn.Terminate()
-	<-closeCh
+	conn.Wait()
 	fmt.Printf("Control: Worker terminated\n")
 
 	// re-spawn again
-	closeCh, err = spawnAndHandle(conn)
-	if err != nil {
+	if err := startHandle(conn); err != nil {
 		log.Fatal(err)
 	}
 	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hey Foo!")), nil); err != nil {
@@ -82,7 +79,7 @@ func main() {
 	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Close")), nil); err != nil {
 		log.Fatal(err)
 	}
-	<-closeCh
+	conn.Wait()
 	fmt.Printf("Control: Worker closed\n")
 
 	fmt.Printf(`Worker Stdout
@@ -121,8 +118,7 @@ func main() {
 		wg.Done()
 	}()
 
-	closeCh, err = spawnAndHandle(conn)
-	if err != nil {
+	if err := startHandle(conn); err != nil {
 		log.Fatal(err)
 	}
 
@@ -133,7 +129,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	<-closeCh
+	conn.Wait()
 	fmt.Printf("Control: Worker closed\n")
 
 	wg.Wait()
@@ -149,11 +145,10 @@ func main() {
 `, stderr.String())
 }
 
-func spawnAndHandle(conn *wasmww.WasmWebWorkerConn) (chan interface{}, error) {
+func startHandle(conn *wasmww.WasmWebWorkerConn) error {
 	if err := conn.Start(); err != nil {
-		return nil, err
+		return err
 	}
-	ch := make(chan interface{})
 	go func() {
 		for evt := range conn.EventChannel() {
 			data, err := evt.Data()
@@ -167,7 +162,6 @@ func spawnAndHandle(conn *wasmww.WasmWebWorkerConn) (chan interface{}, error) {
 			fmt.Printf("Control: Received %q\n", str)
 		}
 		fmt.Printf("Control: Quit event handler\n")
-		close(ch)
 	}()
-	return ch, nil
+	return nil
 }
