@@ -126,7 +126,7 @@ func (conn *WasmWebWorkerConn) Start() error {
 	return nil
 }
 
-// Wait waits for the controler's internal event loop to quit. This can be caused by either worker closes itself, or controler calls `Terminate`.
+// Wait waits for the controller's internal event loop to quit. This can be caused by either worker closes itself, or controler calls `Terminate`.
 func (conn *WasmWebWorkerConn) Wait() {
 	<-conn.closeCh
 }

@@ -4,6 +4,8 @@ package wasmww
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"strings"
 	"syscall/js"
 
@@ -36,28 +38,17 @@ func (s *GlobalSelfConn) SetupConn() (eventCh <-chan worker.MessageEvent, closeF
 		return nil, nil, err
 	}
 
-	// Rewrite the writeSync JS function to make it not only log to console, but also postMessage to the controller.
-	js.Global().Get("fs").Set("writeSync", js.FuncOf(func(this js.Value, args []js.Value) any {
-		jsConsole := js.Global().Get("console")
-		decoder := js.Global().Get("TextDecoder").New("utf-8")
-		fd, buf := args[0], args[1]
-		var outputBuffer string
-		tmpBuf := decoder.Call("decode", buf).String()
-		outputBuffer += tmpBuf
-		nl := strings.LastIndex(outputBuffer, "\n")
-		if nl != -1 {
-			msg := outputBuffer[:nl]
-			jsConsole.Call("log", js.ValueOf(msg))
-			switch fd.Int() {
-			case 1:
-				s.PostMessage(safejs.Safe(js.ValueOf(STDOUT_EVENT+msg+"\n")), nil)
-			case 2:
-				s.PostMessage(safejs.Safe(js.ValueOf(STDERR_EVENT+msg+"\n")), nil)
-			}
-			outputBuffer = outputBuffer[nl+1:]
-		}
-		return buf.Get("length")
-	}))
+	// Redirect stdout/stderr to the controller, instead of just printing to the JS console.
+	SetWriteSync(
+		[]MsgWriterFunc{
+			ConsoleMsgWriterStdout(),
+			ControllerMsgWriterStdout(s),
+		},
+		[]MsgWriterFunc{
+			ConsoleMsgWriterStderr(),
+			ControllerMsgWriterStdout(s),
+		},
+	)
 
 	// Notify the controller that this worker has started listening
 	if err := s.self.PostMessage(safejs.Null(), nil); err != nil {
@@ -86,4 +77,75 @@ func (s *GlobalSelfConn) Name() (string, error) {
 
 func (s *GlobalSelfConn) PostMessage(message safejs.Value, transfers []safejs.Value) error {
 	return s.self.PostMessage(message, transfers)
+}
+
+type MsgWriterFunc func(msg string) error
+
+func ConsoleMsgWriterStdout() MsgWriterFunc {
+	return func(msg string) error {
+		js.Global().Get("console").Call("log", js.ValueOf(msg))
+		return nil
+	}
+}
+
+func ConsoleMsgWriterStderr() MsgWriterFunc {
+	return ConsoleMsgWriterStdout()
+}
+
+func ControllerMsgWriterStdout(s *GlobalSelfConn) MsgWriterFunc {
+	return func(msg string) error {
+		return s.PostMessage(safejs.Safe(js.ValueOf(STDOUT_EVENT+msg+"\n")), nil)
+	}
+}
+
+func ControllerMsgWriterStderr(s *GlobalSelfConn) MsgWriterFunc {
+	return func(msg string) error {
+		return s.PostMessage(safejs.Safe(js.ValueOf(STDERR_EVENT+msg+"\n")), nil)
+	}
+}
+
+func IoWriterMsgWriterStdout(w io.Writer) MsgWriterFunc {
+	return func(msg string) error {
+		_, err := w.Write([]byte(msg))
+		return err
+	}
+}
+
+func IoWriterMsgWriterStderr(w io.Writer) MsgWriterFunc {
+	return IoWriterMsgWriterStdout(w)
+}
+
+// SetWriteSync overrides the "writeSync" implementation that will be called by Go.
+// It redirects the message to a slice of `MsgWriterFunc` functions for both the stdout and stderr.
+func SetWriteSync(stdoutWriters, stderrWriters []MsgWriterFunc) {
+	writeSync := js.FuncOf(func(this js.Value, args []js.Value) any {
+		jsConsole := js.Global().Get("console")
+		decoder := js.Global().Get("TextDecoder").New("utf-8")
+		fd, buf := args[0], args[1]
+		var outputBuffer string
+		tmpBuf := decoder.Call("decode", buf).String()
+		outputBuffer += tmpBuf
+		nl := strings.LastIndex(outputBuffer, "\n")
+		if nl != -1 {
+			msg := outputBuffer[:nl]
+			switch fd.Int() {
+			case 1:
+				for i, w := range stdoutWriters {
+					if err := w(msg); err != nil {
+						jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stdout error: %v", i, err)))
+					}
+				}
+			case 2:
+				for i, w := range stderrWriters {
+					if err := w(msg); err != nil {
+						jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stderr error: %v", i, err)))
+					}
+				}
+			}
+			outputBuffer = outputBuffer[nl+1:]
+		}
+		return buf.Get("length")
+	})
+	jsFS := js.Global().Get("fs")
+	jsFS.Set("writeSync", writeSync)
 }
