@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"sync"
 	"syscall/js"
 	"time"
@@ -16,14 +17,11 @@ import (
 )
 
 func main() {
+	os.Setenv("parent_foo", "parent_bar")
 	var stdout, stderr bytes.Buffer
 	conn := &wasmww.WasmWebWorkerConn{
-		Name: "hello",
-		Path: "hello.wasm",
-		Env: map[string]string{
-			"foo": "bar",
-		},
-		Args:   []string{"wasm", "arg"},
+		Name:   "hello",
+		Path:   "hello.wasm",
 		Stdout: &stdout,
 		Stderr: &stderr,
 	}
@@ -46,6 +44,10 @@ func main() {
 	fmt.Printf("Control: Worker closed\n")
 
 	// Re-spwn
+	conn.Env = []string{
+		"foo=bar",
+	}
+	conn.Args = []string{"wasm", "arg"}
 	if err := startHandle(conn); err != nil {
 		log.Fatal(err)
 	}

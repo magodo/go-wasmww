@@ -22,10 +22,24 @@ const STDERR_EVENT = "__WASMWW_STDERR__"
 // provides a full duplex connection between the web worker.
 // On the web worker, it is expected to call the GlobalSelfConn.SetupConn() to build up the connection.
 type WasmWebWorkerConn struct {
+	// Name specifies an identifying name for the DedicatedWorkerGlobalScope representing the scope of the worker, which is mainly useful for debugging purposes.
+	// If this is not specified, `Start` will create a UUIDv4 for it and populate back.
 	Name string
+
+	// Path is the path of the WASM to run as the Web Worker.
 	Path string
+
+	// Args holds command line arguments, including the WASM as Args[0].
+	// If the Args field is empty or nil, Run uses {Path}.
 	Args []string
-	Env  map[string]string
+
+	// Env specifies the environment of the process.
+	// Each entry is of the form "key=value".
+	// If Env is nil, the new Web Worker uses the current context's
+	// environment.
+	// If Env contains duplicate environment keys, only the last
+	// value in the slice for each duplicate key is used.
+	Env []string
 
 	Stdout io.Writer
 	Stderr io.Writer
