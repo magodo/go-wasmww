@@ -69,13 +69,26 @@ func main() {
 	if err := startHandle(conn); err != nil {
 		log.Fatal(err)
 	}
-	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hey Foo!")), nil); err != nil {
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("WriteToConsole")), nil); err != nil {
 		log.Fatal(err)
 	}
-	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hey Bar!")), nil); err != nil {
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hey Console!")), nil); err != nil {
 		log.Fatal(err)
 	}
-	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hey Baz!")), nil); err != nil {
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("WriteToController")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hey Controller!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("WriteToNull")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Hey Secret!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	// Reset the writer before close
+	if err := conn.PostMessage(safejs.Safe(js.ValueOf("WriteToController")), nil); err != nil {
 		log.Fatal(err)
 	}
 	if err := conn.PostMessage(safejs.Safe(js.ValueOf("Close")), nil); err != nil {
@@ -84,12 +97,12 @@ func main() {
 	conn.Wait()
 	fmt.Printf("Control: Worker closed\n")
 
-	fmt.Printf(`Worker Stdout
+	fmt.Printf(`Worker Stdout (from ctrl buffer)
 ---
 %s
 ---
 `, stdout.String())
-	fmt.Printf(`Worker Stderr
+	fmt.Printf(`Worker Stderr (from ctrl buffer)
 ---
 %s
 ---
@@ -135,12 +148,12 @@ func main() {
 	fmt.Printf("Control: Worker closed\n")
 
 	wg.Wait()
-	fmt.Printf(`Worker Stdout (pipe)
+	fmt.Printf(`Worker Stdout (from ctrl pipe)
 ---
 %s
 ---
 `, stdout.String())
-	fmt.Printf(`Worker Stderr (pipe)
+	fmt.Printf(`Worker Stderr (from ctrl pipe)
 ---
 %s
 ---

@@ -38,15 +38,13 @@ func (s *GlobalSelfConn) SetupConn() (eventCh <-chan worker.MessageEvent, closeF
 		return nil, nil, err
 	}
 
-	// Redirect stdout/stderr to the controller, instead of just printing to the JS console.
-	SetWriteSync(
-		[]MsgWriterFunc{
-			ConsoleMsgWriterStdout(),
-			ControllerMsgWriterStdout(s),
+	// Redirect stdout/stderr to the controller, instead of printing to the JS console.
+	s.SetWriteSync(
+		[]MsgWriter{
+			s.NewMsgWriterToControllerStdout(),
 		},
-		[]MsgWriterFunc{
-			ConsoleMsgWriterStderr(),
-			ControllerMsgWriterStdout(s),
+		[]MsgWriter{
+			s.NewMsgWriterToControllerStderr(),
 		},
 	)
 
@@ -79,45 +77,63 @@ func (s *GlobalSelfConn) PostMessage(message safejs.Value, transfers []safejs.Va
 	return s.self.PostMessage(message, transfers)
 }
 
-type MsgWriterFunc func(msg string) error
+type MsgWriter interface {
+	Write(p []byte) (n int, err error)
+	sealed()
+}
 
-func ConsoleMsgWriterStdout() MsgWriterFunc {
-	return func(msg string) error {
-		js.Global().Get("console").Call("log", js.ValueOf(msg))
-		return nil
+type msgWriterConsole struct{}
+
+func (msgWriterConsole) sealed() {}
+
+func (msgWriterConsole) Write(p []byte) (int, error) {
+	js.Global().Get("console").Call("log", js.ValueOf(string(p)))
+	return len(p), nil
+}
+
+func (s *GlobalSelfConn) NewMsgWriterToConsole() MsgWriter {
+	return msgWriterConsole{}
+}
+
+type msgWriterController struct {
+	self   *GlobalSelfConn
+	prefix string
+}
+
+func (msgWriterController) sealed() {}
+
+func (w *msgWriterController) Write(p []byte) (int, error) {
+	if err := w.self.PostMessage(safejs.Safe(js.ValueOf(w.prefix+string(p)+"\n")), nil); err != nil {
+		return 0, err
 	}
+	return len(p), nil
 }
 
-func ConsoleMsgWriterStderr() MsgWriterFunc {
-	return ConsoleMsgWriterStdout()
+func (s *GlobalSelfConn) NewMsgWriterToControllerStdout() MsgWriter {
+	return &msgWriterController{self: s, prefix: STDOUT_EVENT}
 }
 
-func ControllerMsgWriterStdout(s *GlobalSelfConn) MsgWriterFunc {
-	return func(msg string) error {
-		return s.PostMessage(safejs.Safe(js.ValueOf(STDOUT_EVENT+msg+"\n")), nil)
-	}
+func (s *GlobalSelfConn) NewMsgWriterToControllerStderr() MsgWriter {
+	return &msgWriterController{self: s, prefix: STDERR_EVENT}
 }
 
-func ControllerMsgWriterStderr(s *GlobalSelfConn) MsgWriterFunc {
-	return func(msg string) error {
-		return s.PostMessage(safejs.Safe(js.ValueOf(STDERR_EVENT+msg+"\n")), nil)
-	}
+type msgWriterIoWriter struct {
+	w io.Writer
 }
 
-func IoWriterMsgWriterStdout(w io.Writer) MsgWriterFunc {
-	return func(msg string) error {
-		_, err := w.Write([]byte(msg))
-		return err
-	}
+func (msgWriterIoWriter) sealed() {}
+
+func (w *msgWriterIoWriter) Write(p []byte) (int, error) {
+	return w.w.Write(p)
 }
 
-func IoWriterMsgWriterStderr(w io.Writer) MsgWriterFunc {
-	return IoWriterMsgWriterStdout(w)
+func (s *GlobalSelfConn) NewMsgWriterToIoWriter(w io.Writer) MsgWriter {
+	return &msgWriterIoWriter{w: w}
 }
 
 // SetWriteSync overrides the "writeSync" implementation that will be called by Go.
 // It redirects the message to a slice of `MsgWriterFunc` functions for both the stdout and stderr.
-func SetWriteSync(stdoutWriters, stderrWriters []MsgWriterFunc) {
+func (s *GlobalSelfConn) SetWriteSync(stdoutWriters, stderrWriters []MsgWriter) {
 	writeSync := js.FuncOf(func(this js.Value, args []js.Value) any {
 		jsConsole := js.Global().Get("console")
 		decoder := js.Global().Get("TextDecoder").New("utf-8")
@@ -131,13 +147,13 @@ func SetWriteSync(stdoutWriters, stderrWriters []MsgWriterFunc) {
 			switch fd.Int() {
 			case 1:
 				for i, w := range stdoutWriters {
-					if err := w(msg); err != nil {
+					if _, err := w.Write([]byte(msg)); err != nil {
 						jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stdout error: %v", i, err)))
 					}
 				}
 			case 2:
 				for i, w := range stderrWriters {
-					if err := w(msg); err != nil {
+					if _, err := w.Write([]byte(msg)); err != nil {
 						jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stderr error: %v", i, err)))
 					}
 				}
