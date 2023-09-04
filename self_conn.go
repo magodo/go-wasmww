@@ -4,6 +4,7 @@ package wasmww
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"strings"
 	"syscall/js"
@@ -37,6 +38,18 @@ func (s *GlobalSelfConn) SetupConn() (eventCh <-chan worker.MessageEvent, closeF
 		return nil, nil, err
 	}
 
+	// Redirect stdout/stderr to the controller, instead of just printing to the JS console.
+	SetWriteSync(
+		[]MsgWriterFunc{
+			ConsoleMsgWriterStdout(),
+			ControllerMsgWriterStdout(s),
+		},
+		[]MsgWriterFunc{
+			ConsoleMsgWriterStderr(),
+			ControllerMsgWriterStdout(s),
+		},
+	)
+
 	// Notify the controller that this worker has started listening
 	if err := s.self.PostMessage(safejs.Null(), nil); err != nil {
 		cancel()
@@ -58,9 +71,55 @@ func (s *GlobalSelfConn) SetupConn() (eventCh <-chan worker.MessageEvent, closeF
 	return eventCh, closeFunc, nil
 }
 
-// RedirectStd redirects the stdout and stderr to the given writers. works as same as `os.stderr=...`
-func (*GlobalSelfConn) RedirectStd(stdout_w, stderr_w io.Writer) {
+func (s *GlobalSelfConn) Name() (string, error) {
+	return s.self.Name()
+}
+
+func (s *GlobalSelfConn) PostMessage(message safejs.Value, transfers []safejs.Value) error {
+	return s.self.PostMessage(message, transfers)
+}
+
+type MsgWriterFunc func(msg string) error
+
+func ConsoleMsgWriterStdout() MsgWriterFunc {
+	return func(msg string) error {
+		js.Global().Get("console").Call("log", js.ValueOf(msg))
+		return nil
+	}
+}
+
+func ConsoleMsgWriterStderr() MsgWriterFunc {
+	return ConsoleMsgWriterStdout()
+}
+
+func ControllerMsgWriterStdout(s *GlobalSelfConn) MsgWriterFunc {
+	return func(msg string) error {
+		return s.PostMessage(safejs.Safe(js.ValueOf(STDOUT_EVENT+msg+"\n")), nil)
+	}
+}
+
+func ControllerMsgWriterStderr(s *GlobalSelfConn) MsgWriterFunc {
+	return func(msg string) error {
+		return s.PostMessage(safejs.Safe(js.ValueOf(STDERR_EVENT+msg+"\n")), nil)
+	}
+}
+
+func IoWriterMsgWriterStdout(w io.Writer) MsgWriterFunc {
+	return func(msg string) error {
+		_, err := w.Write([]byte(msg))
+		return err
+	}
+}
+
+func IoWriterMsgWriterStderr(w io.Writer) MsgWriterFunc {
+	return IoWriterMsgWriterStdout(w)
+}
+
+// SetWriteSync overrides the "writeSync" implementation that will be called by Go.
+// It redirects the message to a slice of `MsgWriterFunc` functions for both the stdout and stderr.
+func SetWriteSync(stdoutWriters, stderrWriters []MsgWriterFunc) {
 	writeSync := js.FuncOf(func(this js.Value, args []js.Value) any {
+		jsConsole := js.Global().Get("console")
 		decoder := js.Global().Get("TextDecoder").New("utf-8")
 		fd, buf := args[0], args[1]
 		var outputBuffer string
@@ -71,14 +130,16 @@ func (*GlobalSelfConn) RedirectStd(stdout_w, stderr_w io.Writer) {
 			msg := outputBuffer[:nl]
 			switch fd.Int() {
 			case 1:
-				_, err := stdout_w.Write([]byte(msg))
-				if err != nil {
-					panic(err)
+				for i, w := range stdoutWriters {
+					if err := w(msg); err != nil {
+						jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stdout error: %v", i, err)))
+					}
 				}
 			case 2:
-				_, err := stderr_w.Write([]byte(msg))
-				if err != nil {
-					panic(err)
+				for i, w := range stderrWriters {
+					if err := w(msg); err != nil {
+						jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stderr error: %v", i, err)))
+					}
 				}
 			}
 			outputBuffer = outputBuffer[nl+1:]
@@ -87,12 +148,4 @@ func (*GlobalSelfConn) RedirectStd(stdout_w, stderr_w io.Writer) {
 	})
 	jsFS := js.Global().Get("fs")
 	jsFS.Set("writeSync", writeSync)
-}
-
-func (s *GlobalSelfConn) Name() (string, error) {
-	return s.self.Name()
-}
-
-func (s *GlobalSelfConn) PostMessage(message safejs.Value, transfers []safejs.Value) error {
-	return s.self.PostMessage(message, transfers)
 }
