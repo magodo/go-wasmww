@@ -4,6 +4,7 @@ package wasmww
 
 import (
 	"context"
+	"io"
 	"strings"
 	"syscall/js"
 
@@ -36,31 +37,6 @@ func (s *GlobalSelfConn) SetupConn() (eventCh <-chan worker.MessageEvent, closeF
 		return nil, nil, err
 	}
 
-	// Rewrite the writeSync JS function to make it not only log to console, but also postMessage to the controller.
-	writeSync := js.FuncOf(func(this js.Value, args []js.Value) any {
-		jsConsole := js.Global().Get("console")
-		decoder := js.Global().Get("TextDecoder").New("utf-8")
-		fd, buf := args[0], args[1]
-		var outputBuffer string
-		tmpBuf := decoder.Call("decode", buf).String()
-		outputBuffer += tmpBuf
-		nl := strings.LastIndex(outputBuffer, "\n")
-		if nl != -1 {
-			msg := outputBuffer[:nl]
-			jsConsole.Call("log", js.ValueOf(msg))
-			switch fd.Int() {
-			case 1:
-				s.PostMessage(safejs.Safe(js.ValueOf(STDOUT_EVENT+msg+"\n")), nil)
-			case 2:
-				s.PostMessage(safejs.Safe(js.ValueOf(STDERR_EVENT+msg+"\n")), nil)
-			}
-			outputBuffer = outputBuffer[nl+1:]
-		}
-		return buf.Get("length")
-	})
-	jsFS := js.Global().Get("fs")
-	jsFS.Set("writeSync", writeSync)
-
 	// Notify the controller that this worker has started listening
 	if err := s.self.PostMessage(safejs.Null(), nil); err != nil {
 		cancel()
@@ -80,6 +56,37 @@ func (s *GlobalSelfConn) SetupConn() (eventCh <-chan worker.MessageEvent, closeF
 	}
 
 	return eventCh, closeFunc, nil
+}
+
+// RedirectStd redirects the stdout and stderr to the given writers. works as same as `os.stderr=...`
+func (*GlobalSelfConn) RedirectStd(stdout_w, stderr_w io.Writer) {
+	writeSync := js.FuncOf(func(this js.Value, args []js.Value) any {
+		decoder := js.Global().Get("TextDecoder").New("utf-8")
+		fd, buf := args[0], args[1]
+		var outputBuffer string
+		tmpBuf := decoder.Call("decode", buf).String()
+		outputBuffer += tmpBuf
+		nl := strings.LastIndex(outputBuffer, "\n")
+		if nl != -1 {
+			msg := outputBuffer[:nl]
+			switch fd.Int() {
+			case 1:
+				_, err := stdout_w.Write([]byte(msg))
+				if err != nil {
+					panic(err)
+				}
+			case 2:
+				_, err := stderr_w.Write([]byte(msg))
+				if err != nil {
+					panic(err)
+				}
+			}
+			outputBuffer = outputBuffer[nl+1:]
+		}
+		return buf.Get("length")
+	})
+	jsFS := js.Global().Get("fs")
+	jsFS.Set("writeSync", writeSync)
 }
 
 func (s *GlobalSelfConn) Name() (string, error) {

@@ -1,6 +1,6 @@
-github.com/hack-pad/go-webworkers v0.1.0 h1:QHBJpkXJgW0QRi2iiUGcxwGnmy7lQJL0F8UfsgMXKhA=
-github.com/hack-pad/go-webworkers v0.1.0/go.mod h1:/rmjjgnlw0CursmeqRtP0NGIqo8CR+0o6AtzFydUHJ4=
 github.com/hack-pad/safejs v0.1.1 h1:d5qPO0iQ7h2oVtpzGnLExE+Wn9AtytxIfltcS2b9KD8=
 github.com/hack-pad/safejs v0.1.1/go.mod h1:HdS+bKF1NrE72VoXZeWzxFOVQVUSqZJAG0xNCnb+Tio=
+github.com/magodo/chanio v0.0.0-20230901084223-7f0bc7fb5b4c h1:FL46Kr+0RchAYWIVGFoSLXhKSqVwQDOB4bMGOHxOp6Q=
+github.com/magodo/chanio v0.0.0-20230901084223-7f0bc7fb5b4c/go.mod h1:h8znBXxSpGVpiLc79RwAaMndx+d3DrnynGlmbxPWcX8=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
 github.com/pkg/errors v0.9.1/go.mod h1:bwawxfHBFNV+L2hUp1rHADufV3IMtnDRdf1r5NINEl0=
