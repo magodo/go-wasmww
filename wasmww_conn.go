@@ -65,6 +65,9 @@ func (conn *WasmWebWorkerConn) Start() error {
 	if err := ww.Start(); err != nil {
 		return err
 	}
+	if conn.Name == "" {
+		conn.Name = ww.Name
+	}
 	conn.ww = ww
 	conn.ctx, conn.ctxCancel = context.WithCancel(context.Background())
 
