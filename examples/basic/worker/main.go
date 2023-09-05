@@ -57,10 +57,7 @@ func main() {
 			fmt.Printf("Worker (%s): Close\n", name)
 			continue
 		case "WriteToConsole":
-			self.SetWriteSync(
-				[]wasmww.MsgWriter{self.NewMsgWriterToConsole()},
-				[]wasmww.MsgWriter{self.NewMsgWriterToConsole()},
-			)
+			self.ResetWriteSync()
 			continue
 		case "WriteToNull":
 			self.SetWriteSync(

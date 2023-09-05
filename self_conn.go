@@ -15,6 +15,17 @@ import (
 
 type GlobalSelfConn struct {
 	self *worker.GlobalSelf
+
+	// originWriteSync stores the original js.Func of the "writeSync" from the Go glue file.
+	//
+	// The reason why not just "re-implement" the "same" version in Go when redirecting write to console,
+	// is that there is a wierd issue that although the "same" implementation in Go works in most cases,
+	// when the goroutine running in the current context panics, it will print the `too much recursion` error,
+	// instead of printing the rewind stack.
+	// Persumably, this is due to though the implementations are the same logically, they are different that
+	// the Go version lives in the Go world. When the Go program panics, any registered function in the Go
+	// world won't be accessible. Whilst, the JS one (lives in the glue code) is still accessible.
+	originWriteSync js.Value
 }
 
 func SelfConn() (*GlobalSelfConn, error) {
@@ -22,7 +33,10 @@ func SelfConn() (*GlobalSelfConn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &GlobalSelfConn{self: self}, nil
+	return &GlobalSelfConn{
+		self:            self,
+		originWriteSync: js.Global().Get("fs").Get("writeSync"),
+	}, nil
 }
 
 type WebWorkerCloseFunc func() error
@@ -82,19 +96,6 @@ type MsgWriter interface {
 	sealed()
 }
 
-type msgWriterConsole struct{}
-
-func (msgWriterConsole) sealed() {}
-
-func (msgWriterConsole) Write(p []byte) (int, error) {
-	js.Global().Get("console").Call("log", js.ValueOf(string(p)))
-	return len(p), nil
-}
-
-func (s *GlobalSelfConn) NewMsgWriterToConsole() MsgWriter {
-	return msgWriterConsole{}
-}
-
 type msgWriterController struct {
 	self   *GlobalSelfConn
 	prefix string
@@ -134,34 +135,37 @@ func (s *GlobalSelfConn) NewMsgWriterToIoWriter(w io.Writer) MsgWriter {
 // SetWriteSync overrides the "writeSync" implementation that will be called by Go.
 // It redirects the message to a slice of `MsgWriterFunc` functions for both the stdout and stderr.
 func (s *GlobalSelfConn) SetWriteSync(stdoutWriters, stderrWriters []MsgWriter) {
-	writeSync := js.FuncOf(func(this js.Value, args []js.Value) any {
+	writeSync := func() js.Func {
 		jsConsole := js.Global().Get("console")
-		decoder := js.Global().Get("TextDecoder").New("utf-8")
-		fd, buf := args[0], args[1]
 		var outputBuffer string
-		tmpBuf := decoder.Call("decode", buf).String()
-		outputBuffer += tmpBuf
-		nl := strings.LastIndex(outputBuffer, "\n")
-		if nl != -1 {
-			msg := outputBuffer[:nl]
-			switch fd.Int() {
-			case 1:
-				for i, w := range stdoutWriters {
-					if _, err := w.Write([]byte(msg)); err != nil {
-						jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stdout error: %v", i, err)))
+		return js.FuncOf(func(this js.Value, args []js.Value) any {
+			fd, buf := args[0], args[1]
+			outputBuffer += js.Global().Get("TextDecoder").New("utf-8").Call("decode", buf).String()
+			nl := strings.LastIndex(outputBuffer, "\n")
+			if nl != -1 {
+				msg := outputBuffer[:nl]
+				switch fd.Int() {
+				case 1:
+					for i, w := range stdoutWriters {
+						if _, err := w.Write([]byte(msg)); err != nil {
+							jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stdout error: %v", i, err)))
+						}
+					}
+				case 2:
+					for i, w := range stderrWriters {
+						if _, err := w.Write([]byte(msg)); err != nil {
+							jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stdout error: %v", i, err)))
+						}
 					}
 				}
-			case 2:
-				for i, w := range stderrWriters {
-					if _, err := w.Write([]byte(msg)); err != nil {
-						jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stderr error: %v", i, err)))
-					}
-				}
+				outputBuffer = outputBuffer[nl+1:]
 			}
-			outputBuffer = outputBuffer[nl+1:]
-		}
-		return buf.Get("length")
-	})
-	jsFS := js.Global().Get("fs")
-	jsFS.Set("writeSync", writeSync)
+			return buf.Get("length")
+		})
+	}()
+	js.Global().Get("fs").Set("writeSync", writeSync)
+}
+
+func (s *GlobalSelfConn) ResetWriteSync() {
+	js.Global().Get("fs").Set("writeSync", s.originWriteSync)
 }
