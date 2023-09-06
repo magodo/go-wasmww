@@ -132,6 +132,19 @@ func (s *GlobalSelfConn) NewMsgWriterToIoWriter(w io.Writer) MsgWriter {
 	return &msgWriterIoWriter{w: w}
 }
 
+type msgWriterConsole struct{}
+
+func (msgWriterConsole) sealed() {}
+
+func (msgWriterConsole) Write(p []byte) (int, error) {
+	js.Global().Get("console").Call("log", js.ValueOf(string(p)))
+	return len(p), nil
+}
+
+func (s *GlobalSelfConn) NewMsgWriterToConsole() MsgWriter {
+	return msgWriterConsole{}
+}
+
 // SetWriteSync overrides the "writeSync" implementation that will be called by Go.
 // It redirects the message to a slice of `MsgWriterFunc` functions for both the stdout and stderr.
 func (s *GlobalSelfConn) SetWriteSync(stdoutWriters, stderrWriters []MsgWriter) {
