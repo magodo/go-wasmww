@@ -9,9 +9,9 @@ import (
 	"log"
 	"strings"
 
-	"github.com/hack-pad/go-webworkers/worker"
 	"github.com/hack-pad/safejs"
 	"github.com/magodo/chanio"
+	"github.com/magodo/go-webworkers/types"
 )
 
 const CLOSE_EVENT = "__WASMWW_CLOSE__"
@@ -49,7 +49,7 @@ type WasmWebWorkerConn struct {
 	ww        *WasmWebWorker
 	ctx       context.Context
 	ctxCancel context.CancelFunc
-	eventCh   chan worker.MessageEvent
+	eventCh   chan types.MessageEvent
 	closeCh   chan any
 }
 
@@ -84,7 +84,7 @@ func (conn *WasmWebWorkerConn) Start() error {
 
 	// Create a channel to relay the event from the onmessage channel to the consuming channel,
 	// except it will cancel the listening context and close the channel when the worker closes.
-	eventCh := make(chan worker.MessageEvent)
+	eventCh := make(chan types.MessageEvent)
 	closeCh := make(chan any)
 	go func() {
 		for event := range rawCh {
@@ -190,6 +190,6 @@ func (conn *WasmWebWorkerConn) Terminate() {
 }
 
 // EventChannel returns the channel that receives events sent from the Web Worker.
-func (conn *WasmWebWorkerConn) EventChannel() <-chan worker.MessageEvent {
+func (conn *WasmWebWorkerConn) EventChannel() <-chan types.MessageEvent {
 	return conn.eventCh
 }

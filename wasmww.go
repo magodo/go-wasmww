@@ -12,8 +12,9 @@ import (
 	"text/template"
 
 	"github.com/google/uuid"
-	"github.com/hack-pad/go-webworkers/worker"
 	"github.com/hack-pad/safejs"
+	"github.com/magodo/go-webworkers/types"
+	"github.com/magodo/go-webworkers/worker"
 )
 
 //go:embed worker.js.tpl
@@ -114,6 +115,6 @@ func (ww *WasmWebWorker) Terminate() {
 
 // Listen sends message events on a channel for events fired by self.postMessage() calls inside the Worker's global scope.
 // Stops the listener and closes the channel when ctx is canceled.
-func (ww *WasmWebWorker) Listen(ctx context.Context) (<-chan worker.MessageEvent, error) {
+func (ww *WasmWebWorker) Listen(ctx context.Context) (<-chan types.MessageEvent, error) {
 	return ww.worker.Listen(ctx)
 }

@@ -9,8 +9,9 @@ import (
 	"strings"
 	"syscall/js"
 
-	"github.com/hack-pad/go-webworkers/worker"
 	"github.com/hack-pad/safejs"
+	"github.com/magodo/go-webworkers/types"
+	"github.com/magodo/go-webworkers/worker"
 )
 
 type GlobalSelfConn struct {
@@ -44,7 +45,7 @@ type WebWorkerCloseFunc func() error
 // SetupConn setup the worker for working with the peering WasmWebWorkerConn.
 // The returned eventCh receives the event sent from the peering WasmWebWorkerConn, until the closeFn is called.
 // The closeFn is used to instruct the web worker to stop listening the peering, and close the eventCh.
-func (s *GlobalSelfConn) SetupConn() (eventCh <-chan worker.MessageEvent, closeFn WebWorkerCloseFunc, err error) {
+func (s *GlobalSelfConn) SetupConn() (eventCh <-chan types.MessageEvent, closeFn WebWorkerCloseFunc, err error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	eventCh, err = s.self.Listen(ctx)
 	if err != nil {
