@@ -97,21 +97,21 @@ func (conn *WasmWebWorkerConn) Start() error {
 						conn.ctxCancel()
 						continue
 					}
-					if conn.Stdout != nil {
-						if strings.HasPrefix(str, STDOUT_EVENT) {
+					if strings.HasPrefix(str, STDOUT_EVENT) {
+						if conn.Stdout != nil {
 							if _, err := conn.Stdout.Write([]byte(str[len(STDOUT_EVENT):])); err != nil {
 								log.Fatalf("Controller writing to stdout: %v", err)
 							}
-							continue
 						}
+						continue
 					}
-					if conn.Stderr != nil {
-						if strings.HasPrefix(str, STDERR_EVENT) {
+					if strings.HasPrefix(str, STDERR_EVENT) {
+						if conn.Stderr != nil {
 							if _, err := conn.Stderr.Write([]byte(str[len(STDERR_EVENT):])); err != nil {
 								log.Fatalf("Controller writing to stderr: %v", err)
 							}
-							continue
 						}
+						continue
 					}
 				}
 			}
