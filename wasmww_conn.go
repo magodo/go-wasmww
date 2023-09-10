@@ -5,6 +5,7 @@ package wasmww
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"strings"
@@ -20,7 +21,7 @@ const STDERR_EVENT = "__WASMWW_STDERR__"
 
 // WasmWebWorkerConn is a high level wrapper around the WasmWebWorker, which
 // provides a full duplex connection between the web worker.
-// On the web worker, it is expected to call the GlobalSelfConn.SetupConn() to build up the connection.
+// On the web worker, it is expected to call the SelfConn.SetupConn() to build up the connection.
 type WasmWebWorkerConn struct {
 	// Name specifies an identifying name for the DedicatedWorkerGlobalScope representing the scope of the worker, which is mainly useful for debugging purposes.
 	// If this is not specified, `Start` will create a UUIDv4 for it and populate back.
@@ -49,7 +50,7 @@ type WasmWebWorkerConn struct {
 	ww        *WasmWebWorker
 	ctx       context.Context
 	ctxCancel context.CancelFunc
-	eventCh   chan types.MessageEvent
+	eventCh   chan types.MessageEventMessage
 	closeCh   chan any
 }
 
@@ -80,11 +81,13 @@ func (conn *WasmWebWorkerConn) Start() error {
 	// NOTE: Since JS is single-threaded, we are careful to avoid introducing a switch point until here,
 	// so that we ensure the controller started listening before the worker actually sends the initial sync event back,
 	// as otherwise, this event will be lost.
-	<-rawCh
+	if _, ok := <-rawCh; !ok {
+		return fmt.Errorf("message event channel closed (due to ctx canceled)")
+	}
 
 	// Create a channel to relay the event from the onmessage channel to the consuming channel,
 	// except it will cancel the listening context and close the channel when the worker closes.
-	eventCh := make(chan types.MessageEvent)
+	eventCh := make(chan types.MessageEventMessage)
 	closeCh := make(chan any)
 	go func() {
 		for event := range rawCh {
@@ -190,6 +193,6 @@ func (conn *WasmWebWorkerConn) Terminate() {
 }
 
 // EventChannel returns the channel that receives events sent from the Web Worker.
-func (conn *WasmWebWorkerConn) EventChannel() <-chan types.MessageEvent {
+func (conn *WasmWebWorkerConn) EventChannel() <-chan types.MessageEventMessage {
 	return conn.eventCh
 }

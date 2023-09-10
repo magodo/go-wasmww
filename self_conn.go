@@ -4,9 +4,6 @@ package wasmww
 
 import (
 	"context"
-	"fmt"
-	"io"
-	"strings"
 	"syscall/js"
 
 	"github.com/hack-pad/safejs"
@@ -14,8 +11,11 @@ import (
 	"github.com/magodo/go-webworkers/worker"
 )
 
-type GlobalSelfConn struct {
-	self *worker.GlobalSelf
+type WebWorkerCloseFunc func() error
+
+type SelfConn struct {
+	self      *worker.GlobalSelf
+	closeFunc WebWorkerCloseFunc
 
 	// originWriteSync stores the original js.Func of the "writeSync" from the Go glue file.
 	//
@@ -29,32 +29,45 @@ type GlobalSelfConn struct {
 	originWriteSync js.Value
 }
 
-func SelfConn() (*GlobalSelfConn, error) {
+func NewSelfConn() (*SelfConn, error) {
 	self, err := worker.Self()
 	if err != nil {
 		return nil, err
 	}
-	return &GlobalSelfConn{
+	return &SelfConn{
 		self:            self,
 		originWriteSync: js.Global().Get("fs").Get("writeSync"),
 	}, nil
 }
 
-type WebWorkerCloseFunc func() error
-
 // SetupConn setup the worker for working with the peering WasmWebWorkerConn.
 // The returned eventCh receives the event sent from the peering WasmWebWorkerConn, until the closeFn is called.
-// The closeFn is used to instruct the web worker to stop listening the peering, and close the eventCh.
-func (s *GlobalSelfConn) SetupConn() (eventCh <-chan types.MessageEvent, closeFn WebWorkerCloseFunc, err error) {
+// The closeFn is used to instruct the peering to stop listening to this web worker, and close this web worker.
+func (s *SelfConn) SetupConn() (_ <-chan types.MessageEventMessage, err error) {
 	ctx, cancel := context.WithCancel(context.Background())
-	eventCh, err = s.self.Listen(ctx)
+	ch, err := s.self.Listen(ctx)
 	if err != nil {
 		cancel()
-		return nil, nil, err
+		return nil, err
 	}
 
-	// Redirect stdout/stderr to the controller, instead of printing to the JS console.
-	s.SetWriteSync(
+	s.closeFunc = func() error {
+		cancel()
+		for range ch {
+		}
+
+		msg, err := safejs.ValueOf(CLOSE_EVENT)
+		if err != nil {
+			return err
+		}
+		if err := s.self.PostMessage(msg, nil); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	//Redirect stdout/stderr to the controller, instead of printing to the JS console.
+	SetWriteSync(
 		[]MsgWriter{
 			s.NewMsgWriterToControllerStdout(),
 		},
@@ -66,120 +79,33 @@ func (s *GlobalSelfConn) SetupConn() (eventCh <-chan types.MessageEvent, closeFn
 	// Notify the controller that this worker has started listening
 	if err := s.self.PostMessage(safejs.Null(), nil); err != nil {
 		cancel()
-		return nil, nil, err
+		return nil, err
 	}
 
-	closeFunc := func() error {
-		cancel()
-		msg, err := safejs.ValueOf(CLOSE_EVENT)
-		if err != nil {
-			return err
-		}
-		if err := s.self.PostMessage(msg, nil); err != nil {
-			return err
-		}
-		return s.self.Close()
-	}
-
-	return eventCh, closeFunc, nil
+	return ch, nil
 }
 
-func (s *GlobalSelfConn) Name() (string, error) {
+func (s *SelfConn) Name() (string, error) {
 	return s.self.Name()
 }
 
-func (s *GlobalSelfConn) PostMessage(message safejs.Value, transfers []safejs.Value) error {
+func (s *SelfConn) PostMessage(message safejs.Value, transfers []safejs.Value) error {
 	return s.self.PostMessage(message, transfers)
 }
 
-type MsgWriter interface {
-	Write(p []byte) (n int, err error)
-	sealed()
-}
-
-type msgWriterController struct {
-	self   *GlobalSelfConn
-	prefix string
-}
-
-func (msgWriterController) sealed() {}
-
-func (w *msgWriterController) Write(p []byte) (int, error) {
-	if err := w.self.PostMessage(safejs.Safe(js.ValueOf(w.prefix+string(p)+"\n")), nil); err != nil {
-		return 0, err
-	}
-	return len(p), nil
-}
-
-func (s *GlobalSelfConn) NewMsgWriterToControllerStdout() MsgWriter {
-	return &msgWriterController{self: s, prefix: STDOUT_EVENT}
-}
-
-func (s *GlobalSelfConn) NewMsgWriterToControllerStderr() MsgWriter {
-	return &msgWriterController{self: s, prefix: STDERR_EVENT}
-}
-
-type msgWriterIoWriter struct {
-	w io.Writer
-}
-
-func (msgWriterIoWriter) sealed() {}
-
-func (w *msgWriterIoWriter) Write(p []byte) (int, error) {
-	return w.w.Write(p)
-}
-
-func (s *GlobalSelfConn) NewMsgWriterToIoWriter(w io.Writer) MsgWriter {
-	return &msgWriterIoWriter{w: w}
-}
-
-type msgWriterConsole struct{}
-
-func (msgWriterConsole) sealed() {}
-
-func (msgWriterConsole) Write(p []byte) (int, error) {
-	js.Global().Get("console").Call("log", js.ValueOf(string(p)))
-	return len(p), nil
-}
-
-func (s *GlobalSelfConn) NewMsgWriterToConsole() MsgWriter {
-	return msgWriterConsole{}
-}
-
-// SetWriteSync overrides the "writeSync" implementation that will be called by Go.
-// It redirects the message to a slice of `MsgWriterFunc` functions for both the stdout and stderr.
-func (s *GlobalSelfConn) SetWriteSync(stdoutWriters, stderrWriters []MsgWriter) {
-	writeSync := func() js.Func {
-		jsConsole := js.Global().Get("console")
-		var outputBuffer string
-		return js.FuncOf(func(this js.Value, args []js.Value) any {
-			fd, buf := args[0], args[1]
-			outputBuffer += js.Global().Get("TextDecoder").New("utf-8").Call("decode", buf).String()
-			nl := strings.LastIndex(outputBuffer, "\n")
-			if nl != -1 {
-				msg := outputBuffer[:nl]
-				switch fd.Int() {
-				case 1:
-					for i, w := range stdoutWriters {
-						if _, err := w.Write([]byte(msg)); err != nil {
-							jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stdout error: %v", i, err)))
-						}
-					}
-				case 2:
-					for i, w := range stderrWriters {
-						if _, err := w.Write([]byte(msg)); err != nil {
-							jsConsole.Call("log", js.ValueOf(fmt.Sprintf("%d-th writeSync for stdout error: %v", i, err)))
-						}
-					}
-				}
-				outputBuffer = outputBuffer[nl+1:]
-			}
-			return buf.Get("length")
-		})
-	}()
-	js.Global().Get("fs").Set("writeSync", writeSync)
-}
-
-func (s *GlobalSelfConn) ResetWriteSync() {
+func (s *SelfConn) ResetWriteSync() {
 	js.Global().Get("fs").Set("writeSync", s.originWriteSync)
+}
+
+func (s *SelfConn) NewMsgWriterToControllerStdout() MsgWriter {
+	return &msgWriterController{poster: s.self, prefix: STDOUT_EVENT}
+}
+
+func (s *SelfConn) NewMsgWriterToControllerStderr() MsgWriter {
+	return &msgWriterController{poster: s.self, prefix: STDERR_EVENT}
+}
+
+// Close closes the message handler and the message channel, then notify the controller to do the same.
+func (s *SelfConn) Close() error {
+	return s.closeFunc()
 }

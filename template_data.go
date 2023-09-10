@@ -1,0 +1,70 @@
+package wasmww
+
+import (
+	"bytes"
+	_ "embed"
+	"fmt"
+	"os"
+	"strings"
+	"text/template"
+)
+
+//go:embed worker.js.tpl
+var WorkerJSTpl []byte
+
+//go:embed sharedworker.js.tpl
+var SharedWorkerJSTpl []byte
+
+func buildWorkerJS(args, env []string, path string) (string, error) {
+	return buildJS(args, env, path, WorkerJSTpl)
+}
+
+func buildSharedWorkerJS(args, env []string, path string) (string, error) {
+	return buildJS(args, env, path, SharedWorkerJSTpl)
+}
+
+func buildJS(args, env []string, path string, tpl []byte) (string, error) {
+	var workerJS bytes.Buffer
+
+	if len(args) == 0 {
+		args = []string{path}
+	}
+
+	if len(env) == 0 {
+		env = os.Environ()
+	}
+
+	data := templateData{
+		Path: path,
+		Args: args,
+		Env:  env,
+	}
+	if err := template.Must(template.New("js").Parse(string(tpl))).Execute(&workerJS, data); err != nil {
+		return "", err
+	}
+	return workerJS.String(), nil
+}
+
+type templateData struct {
+	Path string
+	Args []string
+	Env  []string
+}
+
+func (d templateData) ArgsToJS() string {
+	el := []string{}
+	for _, e := range d.Args {
+		el = append(el, `"`+e+`"`)
+	}
+	return "[" + strings.Join(el, ",") + "]"
+}
+
+func (d templateData) EnvToJS() string {
+	el := []string{}
+	for _, entry := range d.Env {
+		if k, v, ok := strings.Cut(entry, "="); ok {
+			el = append(el, fmt.Sprintf(`"%s":"%s"`, k, v))
+		}
+	}
+	return "{" + strings.Join(el, ",") + "}"
+}

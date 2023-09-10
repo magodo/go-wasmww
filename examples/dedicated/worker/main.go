@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	self, err := wasmww.SelfConn()
+	self, err := wasmww.NewSelfConn()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -52,21 +52,20 @@ func main() {
 
 		switch str {
 		case "Close":
-			// cancel the context will close the channel from within the Listen()
-			closeFn()
+			// Effectively close the worker here
 			fmt.Printf("Worker (%s): Close\n", name)
-			continue
+			closeFn()
 		case "WriteToConsole":
 			self.ResetWriteSync()
 			continue
 		case "WriteToNull":
-			self.SetWriteSync(
-				[]wasmww.MsgWriter{self.NewMsgWriterToIoWriter(null)},
-				[]wasmww.MsgWriter{self.NewMsgWriterToIoWriter(null)},
+			wasmww.SetWriteSync(
+				[]wasmww.MsgWriter{wasmww.NewMsgWriterToIoWriter(null)},
+				[]wasmww.MsgWriter{wasmww.NewMsgWriterToIoWriter(null)},
 			)
 			continue
 		case "WriteToController":
-			self.SetWriteSync(
+			wasmww.SetWriteSync(
 				[]wasmww.MsgWriter{self.NewMsgWriterToControllerStdout()},
 				[]wasmww.MsgWriter{self.NewMsgWriterToControllerStderr()},
 			)
@@ -81,6 +80,4 @@ func main() {
 			continue
 		}
 	}
-
-	fmt.Printf("Worker (%s): Exit\n", name)
 }
