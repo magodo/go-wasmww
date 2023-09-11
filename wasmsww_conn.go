@@ -53,25 +53,25 @@ type WasmSharedWebWorkerConn struct {
 // It will fail if the Shared Web Worker already exists. In this case, use Connect() instead.
 func (conn *WasmSharedWebWorkerConn) Start() (*WasmSharedWebWorkerConnMgmtPort, error) {
 	// The first connection to the web worker is for the stdout/stderr
-	consoleConn := &WasmSharedWebWorkerConnMgmtPort{
+	mgmtConn := &WasmSharedWebWorkerConnMgmtPort{
 		name: conn.Name,
 		path: conn.Path,
 		args: conn.Args,
 		env:  conn.Env,
 	}
 
-	if err := consoleConn.start(); err != nil {
+	if err := mgmtConn.start(); err != nil {
 		return nil, err
 	}
 	if conn.Name == "" {
-		conn.Name = consoleConn.name
+		conn.Name = mgmtConn.name
 	}
-	conn.URL = consoleConn.url
+	conn.URL = mgmtConn.url
 
 	if err := conn.Connect(); err != nil {
 		return nil, err
 	}
-	return consoleConn, nil
+	return mgmtConn, nil
 }
 
 // Connect creates a new connection to an active Shared Web Worker.

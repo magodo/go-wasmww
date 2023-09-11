@@ -5,15 +5,16 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"github.com/hack-pad/safejs"
-	"github.com/magodo/go-wasmww"
-	"github.com/magodo/go-webworkers/types"
 	"io"
 	"log"
 	"os"
 	"sync"
 	"syscall/js"
 	"time"
+
+	"github.com/hack-pad/safejs"
+	"github.com/magodo/go-wasmww"
+	"github.com/magodo/go-webworkers/types"
 )
 
 func main() {
@@ -58,6 +59,11 @@ func main() {
 	if err := conn2.Connect(); err != nil {
 		log.Fatal(err)
 	}
+	wg.Add(1)
+	go func() {
+		handle(conn2.EventChannel())()
+		wg.Done()
+	}()
 
 	// Close and wait for the 1st port closed when the 2nd connection is active, to avoid the worker to close itself.
 	// Since on the worker side, we will close it if there is no active connection.
@@ -65,12 +71,6 @@ func main() {
 		log.Fatal(err)
 	}
 	conn1.Wait()
-
-	wg.Add(1)
-	go func() {
-		handle(conn2.EventChannel())()
-		wg.Done()
-	}()
 
 	if err := conn2.PostMessage(safejs.Safe(js.ValueOf("Hi Foo!")), nil); err != nil {
 		log.Fatal(err)
@@ -169,6 +169,9 @@ func main() {
 	if err := mgmtConn.Terminate(); err != nil {
 		log.Fatal(err)
 	}
+
+	mgmtConn.Wait()
+	wg.Wait()
 
 	fmt.Println("Re-spawn worker output:")
 
