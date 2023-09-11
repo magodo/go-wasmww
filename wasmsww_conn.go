@@ -40,7 +40,7 @@ type WasmSharedWebWorkerConn struct {
 	Env []string
 
 	// URL represents the web worker script URL.
-	// This is populated in in the Start(), and is required in the Connect().
+	// This is populated in the Start(), and is required in the Connect().
 	URL string
 
 	ww      *WasmSharedWebWorker
@@ -51,22 +51,22 @@ type WasmSharedWebWorkerConn struct {
 // Start starts a new Shared Web Worker. It spins up a goroutine to receive the events from the Web Worker,
 // and exposes a channel for consuming those events, which can be accessed by the `EventChannel()` method.
 // It will fail if the Shared Web Worker already exists. In this case, use Connect() instead.
-func (conn *WasmSharedWebWorkerConn) Start() (*WasmSharedWebWorkerConsoleConn, error) {
+func (conn *WasmSharedWebWorkerConn) Start() (*WasmSharedWebWorkerConnMgmtPort, error) {
 	// The first connection to the web worker is for the stdout/stderr
-	consoleConn := &WasmSharedWebWorkerConsoleConn{
-		Name: conn.Name,
-		Path: conn.Path,
-		Args: conn.Args,
-		Env:  conn.Env,
+	consoleConn := &WasmSharedWebWorkerConnMgmtPort{
+		name: conn.Name,
+		path: conn.Path,
+		args: conn.Args,
+		env:  conn.Env,
 	}
 
 	if err := consoleConn.start(); err != nil {
 		return nil, err
 	}
 	if conn.Name == "" {
-		conn.Name = consoleConn.Name
+		conn.Name = consoleConn.name
 	}
-	conn.URL = consoleConn.URL
+	conn.URL = consoleConn.url
 
 	if err := conn.Connect(); err != nil {
 		return nil, err
@@ -132,7 +132,7 @@ func (conn *WasmSharedWebWorkerConn) Connect() (err error) {
 	return nil
 }
 
-// Wait waits for the controller's internal event loop to quit. This can be caused by the worker closes itself or calling the Close().
+// Wait waits for the controller's internal event loop to quit. This can be caused by the worker closes itself.
 func (conn *WasmSharedWebWorkerConn) Wait() {
 	<-conn.closeCh
 }

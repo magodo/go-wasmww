@@ -63,7 +63,7 @@ func (s *SelfConn) SetupConn() (_ <-chan types.MessageEventMessage, err error) {
 		if err := s.self.PostMessage(msg, nil); err != nil {
 			return err
 		}
-		return nil
+		return s.self.Close()
 	}
 
 	//Redirect stdout/stderr to the controller, instead of printing to the JS console.
@@ -105,7 +105,7 @@ func (s *SelfConn) NewMsgWriterToControllerStderr() MsgWriter {
 	return &msgWriterController{poster: s.self, prefix: STDERR_EVENT}
 }
 
-// Close closes the message handler and the message channel, then notify the controller to do the same.
+// Close closes the web worker, and close the event channel on the controller side.
 func (s *SelfConn) Close() error {
 	return s.closeFunc()
 }

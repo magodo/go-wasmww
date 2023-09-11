@@ -28,13 +28,19 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("Worker (%s): Args: %v\n", name, os.Args)
-	log.Printf("Worker (%s): Env: %v\n", name, os.Environ())
+	logger := log.New(os.Stdout, fmt.Sprintf("Worker (%s): ", name), 0)
+
+	logger.Printf("Args: %v\n", os.Args)
+	logger.Printf("Env: %v\n", os.Environ())
 
 	null := io.Discard
+	i := 0
 	for port := range connCh {
 		port := port
+		logger := log.New(os.Stdout, fmt.Sprintf("Worker (%s-%d): ", name, i), 0)
+		i++
 		go func() {
+			logger.Printf("started\n")
 			eventCh, err := port.SetupConn()
 			if err != nil {
 				log.Fatal(err)
@@ -42,30 +48,27 @@ func main() {
 			for event := range eventCh {
 				data, err := event.Data()
 				if err != nil {
-					fmt.Printf("Worker (%s): Error: %v\n", name, err)
+					logger.Printf("Error: %v\n", err)
 					continue
 				}
 				str, err := data.String()
 				if err != nil {
-					fmt.Printf("Worker (%s): Error: %v\n", name, err)
+					logger.Printf("Error: %v\n", err)
 					continue
 				}
 
 				switch str {
 				case "ClosePort":
-					log.Printf("Worker (%s): Close port\n", name)
+					logger.Printf("Close port\n")
 					if err := port.Close(); err != nil {
-						log.Fatal(err)
+						logger.Fatal(err)
 					}
 					if self.Idle() {
-						log.Printf("Worker (%s): Close the worker for idle\n", name)
+						logger.Printf("Close the worker for idle\n")
 						if err := self.Close(); err != nil {
 							log.Fatal(err)
 						}
 					}
-					continue
-				case "WriteToConsole":
-					self.ResetWriteSync()
 					continue
 				case "WriteToNull":
 					wasmww.SetWriteSync(
@@ -73,23 +76,17 @@ func main() {
 						[]wasmww.MsgWriter{wasmww.NewMsgWriterToIoWriter(null)},
 					)
 					continue
-				case "WriteToController":
-					wasmww.SetWriteSync(
-						[]wasmww.MsgWriter{self.NewMsgWriterToControllerStdout()},
-						[]wasmww.MsgWriter{self.NewMsgWriterToControllerStderr()},
-					)
-					continue
 				}
 
-				fmt.Printf("Worker (%s): Received message %q\n", name, str)
+				logger.Printf("Received message %q\n", str)
 
 				// Echo back the message
 				if err := port.PostMessage(safejs.Safe(js.ValueOf(str)), nil); err != nil {
-					fmt.Printf("Worker (%s): Error: %v\n", name, err)
+					logger.Printf("Error: %v\n", err)
 					continue
 				}
 			}
 		}()
 	}
-	log.Printf("Worker (%s): Exit\n", name)
+	logger.Printf("Exit\n")
 }

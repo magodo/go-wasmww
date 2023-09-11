@@ -23,19 +23,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	ch, closeFn, err := self.SetupConn()
+	ch, err := self.SetupConn()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	log.Printf("Worker (%s): Args: %v\n", name, os.Args)
 	log.Printf("Worker (%s): Env: %v\n", name, os.Environ())
-
-	defer func() {
-		if err := closeFn(); err != nil {
-			log.Fatal(err)
-		}
-	}()
 
 	null := io.Discard
 	for event := range ch {
@@ -52,9 +46,8 @@ func main() {
 
 		switch str {
 		case "Close":
-			// Effectively close the worker here
 			fmt.Printf("Worker (%s): Close\n", name)
-			closeFn()
+			self.Close()
 		case "WriteToConsole":
 			self.ResetWriteSync()
 			continue

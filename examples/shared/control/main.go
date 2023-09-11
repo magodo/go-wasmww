@@ -5,15 +5,15 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"github.com/hack-pad/safejs"
+	"github.com/magodo/go-wasmww"
+	"github.com/magodo/go-webworkers/types"
 	"io"
 	"log"
 	"os"
 	"sync"
 	"syscall/js"
-
-	"github.com/hack-pad/safejs"
-	"github.com/magodo/go-wasmww"
-	"github.com/magodo/go-webworkers/types"
+	"time"
 )
 
 func main() {
@@ -22,7 +22,7 @@ func main() {
 		Name: "hello",
 		Path: "hello.wasm",
 	}
-	consoleConn, err := conn1.Start()
+	mgmtConn, err := conn1.Start()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -30,12 +30,12 @@ func main() {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		io.Copy(&stdout, consoleConn.Stdout())
+		io.Copy(&stdout, mgmtConn.Stdout())
 		wg.Done()
 	}()
 	wg.Add(1)
 	go func() {
-		io.Copy(&stderr, consoleConn.Stderr())
+		io.Copy(&stderr, mgmtConn.Stderr())
 		wg.Done()
 	}()
 	wg.Add(1)
@@ -96,10 +96,22 @@ func main() {
 	}
 	conn2.Wait()
 
-	if err := conn1.PostMessage(safejs.Safe(js.ValueOf("Hey Foo!")), nil); err != nil {
+	if err := mgmtConn.SetWriteToConsole(); err != nil {
 		log.Fatal(err)
 	}
-	if err := conn1.PostMessage(safejs.Safe(js.ValueOf("Hey Bar!")), nil); err != nil {
+	if err := conn1.PostMessage(safejs.Safe(js.ValueOf("Hey Console!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn1.PostMessage(safejs.Safe(js.ValueOf("WriteToNull")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn1.PostMessage(safejs.Safe(js.ValueOf("Hey Secret!")), nil); err != nil {
+		log.Fatal(err)
+	}
+	if err := mgmtConn.SetWriteToController(); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn1.PostMessage(safejs.Safe(js.ValueOf("Hey Controller!")), nil); err != nil {
 		log.Fatal(err)
 	}
 
@@ -110,10 +122,55 @@ func main() {
 	conn1.Wait()
 
 	// The close of the worker will close the console connection
-	consoleConn.Wait()
+	mgmtConn.Wait()
 
 	// Wait until the console output streams are all copied and event handler done
 	wg.Wait()
+
+	fmt.Printf(`Worker Stdout (from buffer)
+---
+%s
+---
+`, stdout.String())
+	fmt.Printf(`Worker Stderr (from buffer)
+---
+%s
+---
+`, stderr.String())
+
+	// Re-spawn
+	conn1.Env = []string{
+		"foo=bar",
+	}
+	conn1.Args = []string{"wasm", "arg"}
+	mgmtConn, err = conn1.Start()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	wg = sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		io.Copy(&stdout, mgmtConn.Stdout())
+		wg.Done()
+	}()
+	wg.Add(1)
+	go func() {
+		io.Copy(&stderr, mgmtConn.Stderr())
+		wg.Done()
+	}()
+
+	// Give some time to the worker to finish printing...
+	time.Sleep(time.Millisecond * 100)
+
+	// Terminate the worker
+	if err := mgmtConn.Terminate(); err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Re-spawn worker output:")
 
 	fmt.Printf(`Worker Stdout (from buffer)
 ---

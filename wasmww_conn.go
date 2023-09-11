@@ -18,6 +18,8 @@ import (
 const CLOSE_EVENT = "__WASMWW_CLOSE__"
 const STDOUT_EVENT = "__WASMWW_STDOUT__"
 const STDERR_EVENT = "__WASMWW_STDERR__"
+const WRITE_TO_CONSOLE_EVENT = "__WASMWW_WRITE_TO_CONSOLE__"
+const WRITE_TO_CONTROLLER_EVENT = "__WASMWW_WRITE_TO_CONTROLLER"
 
 // WasmWebWorkerConn is a high level wrapper around the WasmWebWorker, which
 // provides a full duplex connection between the web worker.
