@@ -52,11 +52,8 @@ func main() {
 	}
 
 	// Create a 2nd connection to the shared worker
-	conn2 := &wasmww.WasmSharedWebWorkerConn{
-		Name: conn1.Name,
-		URL:  conn1.URL,
-	}
-	if err := conn2.Connect(); err != nil {
+	conn2, err := mgmtConn.Connect()
+	if err != nil {
 		log.Fatal(err)
 	}
 	wg.Add(1)
@@ -80,7 +77,8 @@ func main() {
 	}
 
 	// Connect conn1 back (to test a closed connection can connect again)
-	if err := conn1.Connect(); err != nil {
+	conn1, err = mgmtConn.Connect()
+	if err != nil {
 		log.Fatal(err)
 	}
 
@@ -162,6 +160,22 @@ func main() {
 		wg.Done()
 	}()
 
+	conn2, err = mgmtConn.Connect()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	conn3, err := mgmtConn.Connect()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Close the conn3 explicitly
+	if err := conn3.PostMessage(safejs.Safe(js.ValueOf("ClosePort")), nil); err != nil {
+		log.Fatal(err)
+	}
+	conn3.Wait()
+
 	// Give some time to the worker to finish printing...
 	time.Sleep(time.Millisecond * 100)
 
@@ -170,6 +184,8 @@ func main() {
 		log.Fatal(err)
 	}
 
+	conn1.Wait()
+	conn2.Wait()
 	mgmtConn.Wait()
 	wg.Wait()
 
