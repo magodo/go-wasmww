@@ -5,9 +5,11 @@ package wasmww
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/hack-pad/safejs"
 	"github.com/magodo/chanio"
@@ -17,10 +19,12 @@ import (
 const CLOSE_EVENT = "__WASMWW_CLOSE__"
 const STDOUT_EVENT = "__WASMWW_STDOUT__"
 const STDERR_EVENT = "__WASMWW_STDERR__"
+const WRITE_TO_CONSOLE_EVENT = "__WASMWW_WRITE_TO_CONSOLE__"
+const WRITE_TO_CONTROLLER_EVENT = "__WASMWW_WRITE_TO_CONTROLLER"
 
 // WasmWebWorkerConn is a high level wrapper around the WasmWebWorker, which
 // provides a full duplex connection between the web worker.
-// On the web worker, it is expected to call the GlobalSelfConn.SetupConn() to build up the connection.
+// On the web worker, it is expected to call the SelfConn.SetupConn() to build up the connection.
 type WasmWebWorkerConn struct {
 	// Name specifies an identifying name for the DedicatedWorkerGlobalScope representing the scope of the worker, which is mainly useful for debugging purposes.
 	// If this is not specified, `Start` will create a UUIDv4 for it and populate back.
@@ -47,15 +51,14 @@ type WasmWebWorkerConn struct {
 	pipes []io.Closer
 
 	ww        *WasmWebWorker
-	ctx       context.Context
-	ctxCancel context.CancelFunc
-	eventCh   chan types.MessageEvent
+	closeFunc WebWorkerCloseFunc
+	eventCh   chan types.MessageEventMessage
 	closeCh   chan any
 }
 
 // Start starts a new Web Worker. It spins up a goroutine to receive the events from the Web Worker,
 // and exposes a channel for consuming those events, which can be accessed by the `EventChannel()` method.
-func (conn *WasmWebWorkerConn) Start() error {
+func (conn *WasmWebWorkerConn) Start() (err error) {
 	ww := &WasmWebWorker{
 		Name: conn.Name,
 		Path: conn.Path,
@@ -69,9 +72,15 @@ func (conn *WasmWebWorkerConn) Start() error {
 		conn.Name = ww.Name
 	}
 	conn.ww = ww
-	conn.ctx, conn.ctxCancel = context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 
-	rawCh, err := ww.Listen(conn.ctx)
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+	}()
+
+	rawCh, err := ww.Listen(ctx)
 	if err != nil {
 		return err
 	}
@@ -80,18 +89,23 @@ func (conn *WasmWebWorkerConn) Start() error {
 	// NOTE: Since JS is single-threaded, we are careful to avoid introducing a switch point until here,
 	// so that we ensure the controller started listening before the worker actually sends the initial sync event back,
 	// as otherwise, this event will be lost.
-	<-rawCh
+	if _, ok := <-rawCh; !ok {
+		return fmt.Errorf("message event channel closed (due to ctx canceled)")
+	}
 
 	// Create a channel to relay the event from the onmessage channel to the consuming channel,
 	// except it will cancel the listening context and close the channel when the worker closes.
-	eventCh := make(chan types.MessageEvent)
+	var wg sync.WaitGroup
+	eventCh := make(chan types.MessageEventMessage)
 	closeCh := make(chan any)
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for event := range rawCh {
 			if data, err := event.Data(); err == nil {
 				if str, err := data.String(); err == nil {
 					if str == CLOSE_EVENT {
-						conn.ctxCancel()
+						cancel()
 						continue
 					}
 					if strings.HasPrefix(str, STDOUT_EVENT) {
@@ -123,6 +137,12 @@ func (conn *WasmWebWorkerConn) Start() error {
 
 		conn.ww = nil
 	}()
+
+	conn.closeFunc = func() error {
+		cancel()
+		wg.Wait()
+		return nil
+	}
 
 	conn.eventCh = eventCh
 	conn.closeCh = closeCh
@@ -185,11 +205,11 @@ func (conn *WasmWebWorkerConn) PostMessage(data safejs.Value, transfers []safejs
 
 // Terminate immediately terminates the Worker. Meanwhile, it stops the internal event loop, which makes the `Wait` to return.
 func (conn *WasmWebWorkerConn) Terminate() {
+	conn.closeFunc()
 	conn.ww.Terminate()
-	conn.ctxCancel()
 }
 
 // EventChannel returns the channel that receives events sent from the Web Worker.
-func (conn *WasmWebWorkerConn) EventChannel() <-chan types.MessageEvent {
+func (conn *WasmWebWorkerConn) EventChannel() <-chan types.MessageEventMessage {
 	return conn.eventCh
 }
