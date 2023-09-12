@@ -1,6 +1,11 @@
 package wasmww
 
 import (
+	"context"
+	"fmt"
+	"sync"
+	"syscall/js"
+
 	"github.com/hack-pad/safejs"
 	"github.com/magodo/go-webworkers/types"
 )
@@ -28,9 +33,9 @@ type WasmSharedWebWorkerConn struct {
 	// value in the slice for each duplicate key is used.
 	Env []string
 
-	// url represents the web worker script url.
+	// URL represents the web worker script URL.
 	// This is populated in the Start().
-	url string
+	URL string
 
 	ww        *WasmSharedWebWorker
 	closeFunc WebWorkerCloseFunc
@@ -58,7 +63,7 @@ func (conn *WasmSharedWebWorkerConn) Start() (*WasmSharedWebWorkerMgmtConn, erro
 	if conn.Name == "" {
 		conn.Name = mgmtConn.name
 	}
-	conn.url = mgmtConn.url
+	conn.URL = mgmtConn.url
 
 	newConn, err := mgmtConn.Connect()
 	if err != nil {
@@ -66,6 +71,74 @@ func (conn *WasmSharedWebWorkerConn) Start() (*WasmSharedWebWorkerMgmtConn, erro
 	}
 	*conn = *newConn
 	return mgmtConn, nil
+}
+
+// Connect creates a new WasmSharedWebWorkerConn to an active Shared Web Worker.
+// Only the conn.Name and conn.URL matters.
+func (conn *WasmSharedWebWorkerConn) Connect() (err error) {
+	ww := &WasmSharedWebWorker{
+		Name: conn.Name,
+		URL:  conn.URL,
+	}
+
+	if err := ww.Connect(); err != nil {
+		return err
+	}
+
+	conn.ww = ww
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+	}()
+
+	rawCh, err := ww.Listen(ctx)
+	if err != nil {
+		return err
+	}
+
+	// Wait for the sync message
+	if _, ok := <-rawCh; !ok {
+		return fmt.Errorf("channel closed (due to ctx canceled)")
+	}
+
+	// Create a channel to relay the event from the onmessage channel to the consuming channel,
+	// except it will cancel the listening context and close the channel when the worker closes.
+	eventCh := make(chan types.MessageEventMessage)
+	closeCh := make(chan any)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for event := range rawCh {
+			if data, err := event.Data(); err == nil {
+				if str, err := data.String(); err == nil {
+					if str == CLOSE_EVENT {
+						cancel()
+						continue
+					}
+				}
+			}
+			eventCh <- event
+		}
+		close(closeCh)
+		close(eventCh)
+		conn.ww = nil
+	}()
+	conn.closeFunc = func() error {
+		cancel()
+		wg.Wait()
+		if err := ww.PostMessage(safejs.Safe(js.ValueOf(CLOSE_EVENT)), nil); err != nil {
+			return err
+		}
+		return ww.Close()
+	}
+	conn.eventCh = eventCh
+	conn.closeCh = closeCh
+
+	return nil
 }
 
 // Wait waits for the controller's internal event loop to quit. This can be caused by the worker closes itself.

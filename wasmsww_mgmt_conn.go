@@ -12,7 +12,6 @@ import (
 	"github.com/hack-pad/safejs"
 
 	"github.com/magodo/chanio"
-	"github.com/magodo/go-webworkers/types"
 )
 
 // WasmSharedWebWorkerMgmtConn is a connection to a newly started Shared Web Worker.
@@ -174,78 +173,18 @@ func (c *WasmSharedWebWorkerMgmtConn) start() (err error) {
 	return nil
 }
 
-// Connect creates a new WasmSharedWebWorkerConn to an active Shared Web Worker.
+// Connect is a utility function taht creates a new WasmSharedWebWorkerConn and connect it to the active Shared Web Worker.
 func (c *WasmSharedWebWorkerMgmtConn) Connect() (conn *WasmSharedWebWorkerConn, err error) {
-	ww := &WasmSharedWebWorker{
-		Name: c.name,
-		URL:  c.url,
-	}
-
-	if err := ww.Connect(); err != nil {
-		return nil, err
-	}
-
 	conn = &WasmSharedWebWorkerConn{
 		Name: c.name,
 		Path: c.path,
-		Env:  c.env,
 		Args: c.args,
-		url:  c.url,
-		ww:   ww,
+		Env:  c.env,
+		URL:  c.url,
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-
-	defer func() {
-		if err != nil {
-			cancel()
-		}
-	}()
-
-	rawCh, err := ww.Listen(ctx)
-	if err != nil {
+	if err := conn.Connect(); err != nil {
 		return nil, err
 	}
-
-	// Wait for the sync message
-	if _, ok := <-rawCh; !ok {
-		return nil, fmt.Errorf("channel closed (due to ctx canceled)")
-	}
-
-	// Create a channel to relay the event from the onmessage channel to the consuming channel,
-	// except it will cancel the listening context and close the channel when the worker closes.
-	eventCh := make(chan types.MessageEventMessage)
-	closeCh := make(chan any)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for event := range rawCh {
-			if data, err := event.Data(); err == nil {
-				if str, err := data.String(); err == nil {
-					if str == CLOSE_EVENT {
-						cancel()
-						continue
-					}
-				}
-			}
-			eventCh <- event
-		}
-		close(closeCh)
-		close(eventCh)
-		conn.ww = nil
-	}()
-	conn.closeFunc = func() error {
-		cancel()
-		wg.Wait()
-		if err := ww.PostMessage(safejs.Safe(js.ValueOf(CLOSE_EVENT)), nil); err != nil {
-			return err
-		}
-		return ww.Close()
-	}
-	conn.eventCh = eventCh
-	conn.closeCh = closeCh
-
 	return conn, nil
 }
 

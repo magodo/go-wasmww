@@ -205,8 +205,18 @@ func main() {
 		wg.Done()
 	}()
 
+	// Connect via mgmt connection
 	conn2, err = mgmtConn.Connect()
 	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Connect via newly constructing a conn
+	conn3 = &wasmww.WasmSharedWebWorkerConn{
+		Name: conn1.Name,
+		URL:  conn1.URL,
+	}
+	if err := conn3.Connect(); err != nil {
 		log.Fatal(err)
 	}
 
@@ -217,6 +227,7 @@ func main() {
 
 	conn1.Wait()
 	conn2.Wait()
+	conn3.Wait()
 	mgmtConn.Wait()
 	wg.Wait()
 
