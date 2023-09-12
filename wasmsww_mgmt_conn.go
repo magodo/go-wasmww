@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"slices"
 	"strings"
+	"sync"
 	"syscall/js"
 
 	"github.com/hack-pad/safejs"
@@ -33,7 +33,6 @@ type WasmSharedWebWorkerMgmtConn struct {
 	stderr io.ReadCloser
 
 	ww        *WasmSharedWebWorker
-	conns     []*WasmSharedWebWorkerConn
 	closeFunc WebWorkerCloseFunc
 	closeCh   chan any
 }
@@ -71,6 +70,14 @@ func (c *WasmSharedWebWorkerMgmtConn) start() (err error) {
 		return fmt.Errorf("message event channel closed (due to ctx canceled)")
 	}
 
+	// No need to listen for the initial channel, so we close it and the underlying resources.
+	cancel()
+	for range initCh {
+	}
+	if err := ww.Close(); err != nil {
+		return err
+	}
+
 	// Connect again when the worker is ready for connection
 	if err := ww.Connect(); err != nil {
 		return err
@@ -91,20 +98,18 @@ func (c *WasmSharedWebWorkerMgmtConn) start() (err error) {
 	c.stderr = stderrR
 	c.closeCh = closeCh
 
+	// Create a new context for the real channel
+	ctx, cancel = context.WithCancel(context.Background())
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+	}()
+
 	mgmtCh, err := ww.Listen(ctx)
 	if err != nil {
 		return err
 	}
-
-	closeFunc := func() error {
-		cancel()
-		for range mgmtCh {
-		}
-		stdoutW.Close()
-		stderrW.Close()
-		return nil
-	}
-	c.closeFunc = closeFunc
 
 	// Wait for the worker's console msg ready event, which is non-null only to indicate the console message channel is ready.
 	readyMsg, ok := <-mgmtCh
@@ -123,12 +128,17 @@ func (c *WasmSharedWebWorkerMgmtConn) start() (err error) {
 
 	// Consume the message that represents the stdout/stderr of the web worker.
 	// It will cancel the listening context and close the channel when the worker closes.
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for event := range mgmtCh {
 			if data, err := event.Data(); err == nil {
 				if str, err := data.String(); err == nil {
 					if str == CLOSE_EVENT {
-						closeFunc()
+						cancel()
+						stdoutW.Close()
+						stderrW.Close()
 						continue
 					}
 					if strings.HasPrefix(str, STDOUT_EVENT) {
@@ -149,6 +159,18 @@ func (c *WasmSharedWebWorkerMgmtConn) start() (err error) {
 		}
 		close(closeCh)
 	}()
+
+	c.closeFunc = func() error {
+		cancel()
+		wg.Wait()
+		if err := ww.PostMessage(safejs.Safe(js.ValueOf(CLOSE_EVENT)), nil); err != nil {
+			return err
+		}
+		stdoutW.Close()
+		stderrW.Close()
+		return nil
+	}
+
 	return nil
 }
 
@@ -164,16 +186,13 @@ func (c *WasmSharedWebWorkerMgmtConn) Connect() (conn *WasmSharedWebWorkerConn, 
 	}
 
 	conn = &WasmSharedWebWorkerConn{
-		Name:     c.name,
-		Path:     c.path,
-		Env:      c.env,
-		Args:     c.args,
-		url:      c.url,
-		ww:       ww,
-		mgmtPort: c,
+		Name: c.name,
+		Path: c.path,
+		Env:  c.env,
+		Args: c.args,
+		url:  c.url,
+		ww:   ww,
 	}
-
-	c.conns = append(c.conns, conn)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -193,27 +212,19 @@ func (c *WasmSharedWebWorkerMgmtConn) Connect() (conn *WasmSharedWebWorkerConn, 
 		return nil, fmt.Errorf("channel closed (due to ctx canceled)")
 	}
 
-	closeFunc := func() error {
-		cancel()
-		for range rawCh {
-		}
-		c.conns = slices.DeleteFunc(c.conns, func(c *WasmSharedWebWorkerConn) bool {
-			return conn == c
-		})
-		return nil
-	}
-	conn.closeFunc = closeFunc
-
 	// Create a channel to relay the event from the onmessage channel to the consuming channel,
 	// except it will cancel the listening context and close the channel when the worker closes.
 	eventCh := make(chan types.MessageEventMessage)
 	closeCh := make(chan any)
+	var wg sync.WaitGroup
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for event := range rawCh {
 			if data, err := event.Data(); err == nil {
 				if str, err := data.String(); err == nil {
 					if str == CLOSE_EVENT {
-						closeFunc()
+						cancel()
 						continue
 					}
 				}
@@ -224,21 +235,23 @@ func (c *WasmSharedWebWorkerMgmtConn) Connect() (conn *WasmSharedWebWorkerConn, 
 		close(eventCh)
 		conn.ww = nil
 	}()
+	conn.closeFunc = func() error {
+		cancel()
+		wg.Wait()
+		if err := ww.PostMessage(safejs.Safe(js.ValueOf(CLOSE_EVENT)), nil); err != nil {
+			return err
+		}
+		return ww.Close()
+	}
 	conn.eventCh = eventCh
 	conn.closeCh = closeCh
 
 	return conn, nil
 }
 
-// Terminate mimics the terminate method of the DedicatedWorkerGlobalScope, by sending a close message to the shared worker, which will close itself on receive.
-// Meanwhile, it will close the event channels of all the WasmSharedWebWorkerConn connected to this shared worker.
-func (c *WasmSharedWebWorkerMgmtConn) Terminate() error {
-	if err := c.ww.PostMessage(safejs.Safe(js.ValueOf(CLOSE_EVENT)), nil); err != nil {
-		return err
-	}
-	for _, conn := range c.conns {
-		conn.closeFunc()
-	}
+// Close mimics the terminate method of the DedicatedWorkerGlobalScope, but more gracefully.
+// It sends a close message to the shared worker, which will in turn relay the close message back to the outside, and close itself in the meanwhile.
+func (c *WasmSharedWebWorkerMgmtConn) Close() error {
 	return c.closeFunc()
 }
 

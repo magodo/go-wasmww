@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"strings"
+	"sync"
 
 	"github.com/hack-pad/safejs"
 	"github.com/magodo/chanio"
@@ -50,15 +51,14 @@ type WasmWebWorkerConn struct {
 	pipes []io.Closer
 
 	ww        *WasmWebWorker
-	ctx       context.Context
-	ctxCancel context.CancelFunc
+	closeFunc WebWorkerCloseFunc
 	eventCh   chan types.MessageEventMessage
 	closeCh   chan any
 }
 
 // Start starts a new Web Worker. It spins up a goroutine to receive the events from the Web Worker,
 // and exposes a channel for consuming those events, which can be accessed by the `EventChannel()` method.
-func (conn *WasmWebWorkerConn) Start() error {
+func (conn *WasmWebWorkerConn) Start() (err error) {
 	ww := &WasmWebWorker{
 		Name: conn.Name,
 		Path: conn.Path,
@@ -72,9 +72,15 @@ func (conn *WasmWebWorkerConn) Start() error {
 		conn.Name = ww.Name
 	}
 	conn.ww = ww
-	conn.ctx, conn.ctxCancel = context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
 
-	rawCh, err := ww.Listen(conn.ctx)
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+	}()
+
+	rawCh, err := ww.Listen(ctx)
 	if err != nil {
 		return err
 	}
@@ -89,14 +95,17 @@ func (conn *WasmWebWorkerConn) Start() error {
 
 	// Create a channel to relay the event from the onmessage channel to the consuming channel,
 	// except it will cancel the listening context and close the channel when the worker closes.
+	var wg sync.WaitGroup
 	eventCh := make(chan types.MessageEventMessage)
 	closeCh := make(chan any)
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for event := range rawCh {
 			if data, err := event.Data(); err == nil {
 				if str, err := data.String(); err == nil {
 					if str == CLOSE_EVENT {
-						conn.ctxCancel()
+						cancel()
 						continue
 					}
 					if strings.HasPrefix(str, STDOUT_EVENT) {
@@ -128,6 +137,12 @@ func (conn *WasmWebWorkerConn) Start() error {
 
 		conn.ww = nil
 	}()
+
+	conn.closeFunc = func() error {
+		cancel()
+		wg.Wait()
+		return nil
+	}
 
 	conn.eventCh = eventCh
 	conn.closeCh = closeCh
@@ -190,8 +205,8 @@ func (conn *WasmWebWorkerConn) PostMessage(data safejs.Value, transfers []safejs
 
 // Terminate immediately terminates the Worker. Meanwhile, it stops the internal event loop, which makes the `Wait` to return.
 func (conn *WasmWebWorkerConn) Terminate() {
+	conn.closeFunc()
 	conn.ww.Terminate()
-	conn.ctxCancel()
 }
 
 // EventChannel returns the channel that receives events sent from the Web Worker.

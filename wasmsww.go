@@ -38,7 +38,7 @@ type WasmSharedWebWorker struct {
 	// This is ignored in the Connect().
 	Env []string
 
-	// URL represents the web worker script URL.
+	// url represents the web worker script url.
 	// This is filled in in the Start(), and is required in the Connect().
 	URL string
 
@@ -111,4 +111,9 @@ func (ww *WasmSharedWebWorker) PostMessage(data safejs.Value, transfers []safejs
 // Stops the listener and closes the channel when ctx is canceled.
 func (ww *WasmSharedWebWorker) Listen(ctx context.Context) (<-chan types.MessageEventMessage, error) {
 	return ww.worker.Listen(ctx)
+}
+
+// Close closes the message port of this worker.
+func (ww *WasmSharedWebWorker) Close() error {
+	return ww.worker.Close()
 }

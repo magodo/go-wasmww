@@ -87,16 +87,16 @@ func (s *SelfSharedConn) SetupConn() (_ <-chan *SelfSharedConnPort, err error) {
 		},
 	)
 
-	var wg sync.WaitGroup
-
 	// Listening on mgmt message from this port, currently, only close event will be sent through it.
 	mgmtCh, err := mgmtPort.Listen(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for event := range mgmtCh {
 			data, err := event.Data()
 			if err != nil {
@@ -108,8 +108,7 @@ func (s *SelfSharedConn) SetupConn() (_ <-chan *SelfSharedConnPort, err error) {
 			}
 			switch str {
 			case CLOSE_EVENT:
-				// Directly close the worker
-				s.self.Close()
+				s.closeFunc()
 			case WRITE_TO_CONSOLE_EVENT:
 				s.ResetWriteSync()
 			case WRITE_TO_CONTROLLER_EVENT:
@@ -119,7 +118,6 @@ func (s *SelfSharedConn) SetupConn() (_ <-chan *SelfSharedConnPort, err error) {
 				)
 			}
 		}
-		wg.Done()
 	}()
 
 	// Notify the controller with a non-null msg to indicate the mgmt port connection is set up
@@ -132,6 +130,7 @@ func (s *SelfSharedConn) SetupConn() (_ <-chan *SelfSharedConnPort, err error) {
 	ch := make(chan *SelfSharedConnPort)
 	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		for event := range connCh {
 			if ports, err := event.Ports(); err == nil {
 				if len(ports) == 1 {
@@ -144,23 +143,24 @@ func (s *SelfSharedConn) SetupConn() (_ <-chan *SelfSharedConnPort, err error) {
 			}
 		}
 		close(ch)
-		wg.Done()
 	}()
 
 	s.closeFunc = func() error {
+		ports := make([]*SelfSharedConnPort, len(s.ports))
+		copy(ports, s.ports)
+		for _, port := range ports {
+			port.closeFunc()
+		}
+
+		if s.mgmtPort != nil {
+			s.mgmtPort.PostMessage(safejs.Safe(js.ValueOf(CLOSE_EVENT)), nil)
+		}
+
+		// This must comes after calling the closeFunc of ports, otherwise, those CLOSE events
+		// will fail to be sent to outside (not sure why).
 		cancel()
 		wg.Wait()
 
-		msg, err := safejs.ValueOf(CLOSE_EVENT)
-		if err != nil {
-			return err
-		}
-		for _, port := range s.ports {
-			port.closeFunc()
-		}
-		if s.mgmtPort != nil {
-			s.mgmtPort.PostMessage(msg, nil)
-		}
 		// Close this web worker
 		return s.self.Close()
 	}

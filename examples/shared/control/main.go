@@ -124,17 +124,7 @@ func main() {
 
 	// Wait until the console output streams are all copied and event handler done
 	wg.Wait()
-
-	fmt.Printf(`Worker Stdout (from buffer)
----
-%s
----
-`, stdout.String())
-	fmt.Printf(`Worker Stderr (from buffer)
----
-%s
----
-`, stderr.String())
+	printWorker(stdout, stderr)
 
 	// Re-spawn
 	conn1.Env = []string{
@@ -170,17 +160,58 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// Close the conn3 explicitly
+	// Close the conn3 from within the worker
 	if err := conn3.PostMessage(safejs.Safe(js.ValueOf("ClosePort")), nil); err != nil {
 		log.Fatal(err)
 	}
 	conn3.Wait()
 
+	// CLose the conn2 from the outside
+	if err := conn2.Close(); err != nil {
+		log.Fatal(err)
+	}
+	conn2.Wait()
+
 	// Give some time to the worker to finish printing...
 	time.Sleep(time.Millisecond * 100)
 
 	// Terminate the worker
-	if err := mgmtConn.Terminate(); err != nil {
+	if err := mgmtConn.Close(); err != nil {
+		log.Fatal(err)
+	}
+
+	conn1.Wait()
+	mgmtConn.Wait()
+	wg.Wait()
+
+	printWorker(stdout, stderr)
+
+	mgmtConn, err = conn1.Start()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	wg = sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		io.Copy(&stdout, mgmtConn.Stdout())
+		wg.Done()
+	}()
+	wg.Add(1)
+	go func() {
+		io.Copy(&stderr, mgmtConn.Stderr())
+		wg.Done()
+	}()
+
+	conn2, err = mgmtConn.Connect()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Close the worker from a random connection with other connections active
+	if err := conn2.PostMessage(safejs.Safe(js.ValueOf("CloseWorker")), nil); err != nil {
 		log.Fatal(err)
 	}
 
@@ -189,18 +220,7 @@ func main() {
 	mgmtConn.Wait()
 	wg.Wait()
 
-	fmt.Println("Re-spawn worker output:")
-
-	fmt.Printf(`Worker Stdout (from buffer)
----
-%s
----
-`, stdout.String())
-	fmt.Printf(`Worker Stderr (from buffer)
----
-%s
----
-`, stderr.String())
+	printWorker(stdout, stderr)
 }
 
 func handle(ch <-chan types.MessageEventMessage) func() {
@@ -218,4 +238,17 @@ func handle(ch <-chan types.MessageEventMessage) func() {
 		}
 		fmt.Printf("Control: Quit event handler\n")
 	}
+}
+
+func printWorker(stdout, stderr bytes.Buffer) {
+	fmt.Printf(`Worker Stdout
+---
+%s
+---
+`, stdout.String())
+	fmt.Printf(`Worker Stderr
+---
+%s
+---
+`, stderr.String())
 }

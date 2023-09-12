@@ -33,7 +33,6 @@ type WasmSharedWebWorkerConn struct {
 	url string
 
 	ww        *WasmSharedWebWorker
-	mgmtPort  *WasmSharedWebWorkerMgmtConn
 	closeFunc WebWorkerCloseFunc
 	eventCh   chan types.MessageEventMessage
 	closeCh   chan any
@@ -82,4 +81,9 @@ func (conn *WasmSharedWebWorkerConn) PostMessage(data safejs.Value, transfers []
 // EventChannel returns the channel that receives events sent from the Web Worker.
 func (conn *WasmSharedWebWorkerConn) EventChannel() <-chan types.MessageEventMessage {
 	return conn.eventCh
+}
+
+// Close closes this WasmSharedWebWorkerConn at the outside and notify the web worker.
+func (conn *WasmSharedWebWorkerConn) Close() error {
+	return conn.closeFunc()
 }

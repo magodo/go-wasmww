@@ -2,9 +2,11 @@ package wasmww
 
 import (
 	"context"
+	"slices"
+	"syscall/js"
+
 	"github.com/hack-pad/safejs"
 	"github.com/magodo/go-webworkers/types"
-	"slices"
 )
 
 type SelfSharedConnPort struct {
@@ -31,26 +33,18 @@ func (p *SelfSharedConnPort) SetupConn() (_ <-chan types.MessageEventMessage, er
 		for range ch {
 		}
 
-		msg, err := safejs.ValueOf(CLOSE_EVENT)
-		if err != nil {
-			return err
-		}
-		if err := p.port.PostMessage(msg, nil); err != nil {
-			return err
-		}
-		if err := p.port.Close(); err != nil {
+		if err := p.port.PostMessage(safejs.Safe(js.ValueOf(CLOSE_EVENT)), nil); err != nil {
 			return err
 		}
 		// Remove this port from the conn's ports array
 		p.conn.ports = slices.DeleteFunc(p.conn.ports, func(port *SelfSharedConnPort) bool {
 			return port == p
 		})
-		return nil
+		return p.port.Close()
 	}
 
 	// Notify the controller that this worker has started listening
 	if err := p.port.PostMessage(safejs.Null(), nil); err != nil {
-		p.closeFunc()
 		return nil, err
 	}
 

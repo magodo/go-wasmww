@@ -70,6 +70,11 @@ func main() {
 						}
 					}
 					continue
+				case "CloseWorker":
+					logger.Printf("Close the worker\n")
+					if err := self.Close(); err != nil {
+						log.Fatal(err)
+					}
 				case "WriteToNull":
 					wasmww.SetWriteSync(
 						[]wasmww.MsgWriter{wasmww.NewMsgWriterToIoWriter(null)},

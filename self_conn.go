@@ -45,9 +45,14 @@ func NewSelfConn() (*SelfConn, error) {
 // The closeFn is used to instruct the peering to stop listening to this web worker, and close this web worker.
 func (s *SelfConn) SetupConn() (_ <-chan types.MessageEventMessage, err error) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+	}()
+
 	ch, err := s.self.Listen(ctx)
 	if err != nil {
-		cancel()
 		return nil, err
 	}
 
@@ -55,12 +60,7 @@ func (s *SelfConn) SetupConn() (_ <-chan types.MessageEventMessage, err error) {
 		cancel()
 		for range ch {
 		}
-
-		msg, err := safejs.ValueOf(CLOSE_EVENT)
-		if err != nil {
-			return err
-		}
-		if err := s.self.PostMessage(msg, nil); err != nil {
+		if err := s.self.PostMessage(safejs.Safe(js.ValueOf(CLOSE_EVENT)), nil); err != nil {
 			return err
 		}
 		return s.self.Close()
