@@ -186,6 +186,7 @@ func main() {
 
 	printWorker(stdout, stderr)
 
+	// Re-spawn again
 	mgmtConn, err = conn1.Start()
 	if err != nil {
 		log.Fatal(err)
@@ -232,6 +233,8 @@ func main() {
 	wg.Wait()
 
 	printWorker(stdout, stderr)
+
+	fmt.Println("Control: End")
 }
 
 func handle(ch <-chan types.MessageEventMessage) func() {

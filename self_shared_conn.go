@@ -93,10 +93,10 @@ func (s *SelfSharedConn) SetupConn() (_ <-chan *SelfSharedConnPort, err error) {
 		return nil, err
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
+	var wg1, wg2 sync.WaitGroup
+	wg1.Add(1)
 	go func() {
-		defer wg.Done()
+		defer wg1.Done()
 		for event := range mgmtCh {
 			data, err := event.Data()
 			if err != nil {
@@ -108,9 +108,21 @@ func (s *SelfSharedConn) SetupConn() (_ <-chan *SelfSharedConnPort, err error) {
 			}
 			switch str {
 			case CLOSE_EVENT:
-				s.closeFunc()
+				ports := make([]*SelfSharedConnPort, len(s.ports))
+				copy(ports, s.ports)
+				for _, port := range ports {
+					port.closeFunc()
+				}
+
+				cancel()
+				wg2.Wait()
+
+				// Close this web worker
+				s.self.Close()
+
 			case WRITE_TO_CONSOLE_EVENT:
 				s.ResetWriteSync()
+
 			case WRITE_TO_CONTROLLER_EVENT:
 				SetWriteSync(
 					[]MsgWriter{s.NewMsgWriterToControllerStdout()},
@@ -128,16 +140,20 @@ func (s *SelfSharedConn) SetupConn() (_ <-chan *SelfSharedConnPort, err error) {
 	// Create a channel to relay the event from the onmessage channel to the consuming channel,
 	// except it will close the scope itself when the parent sends a close event.
 	ch := make(chan *SelfSharedConnPort)
-	wg.Add(1)
+	wg2.Add(1)
 	go func() {
-		defer wg.Done()
+		defer wg2.Done()
 		for event := range connCh {
 			if ports, err := event.Ports(); err == nil {
 				if len(ports) == 1 {
 					port := ports[0]
-					ch <- &SelfSharedConnPort{
+					select {
+					case ch <- &SelfSharedConnPort{
 						conn: s,
 						port: port,
+					}:
+					case <-ctx.Done():
+						break
 					}
 				}
 			}
@@ -159,7 +175,8 @@ func (s *SelfSharedConn) SetupConn() (_ <-chan *SelfSharedConnPort, err error) {
 		// This must comes after calling the closeFunc of ports, otherwise, those CLOSE events
 		// will fail to be sent to outside (not sure why).
 		cancel()
-		wg.Wait()
+		wg1.Wait()
+		wg2.Wait()
 
 		// Close this web worker
 		return s.self.Close()
@@ -170,6 +187,10 @@ func (s *SelfSharedConn) SetupConn() (_ <-chan *SelfSharedConnPort, err error) {
 
 func (s *SelfSharedConn) Name() (string, error) {
 	return s.self.Name()
+}
+
+func (s *SelfSharedConn) Location() (*types.WorkerLocation, error) {
+	return s.self.Location()
 }
 
 func (s *SelfSharedConn) ResetWriteSync() {

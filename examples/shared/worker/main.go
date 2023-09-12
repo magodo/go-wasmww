@@ -33,6 +33,12 @@ func main() {
 	logger.Printf("Args: %v\n", os.Args)
 	logger.Printf("Env: %v\n", os.Environ())
 
+	location, err := self.Location()
+	if err != nil {
+		log.Fatal(err)
+	}
+	logger.Printf("Location: %s\n", location)
+
 	null := io.Discard
 	i := 0
 	for port := range connCh {
@@ -93,5 +99,5 @@ func main() {
 			}
 		}()
 	}
-	logger.Printf("Exit\n")
+	select {}
 }
