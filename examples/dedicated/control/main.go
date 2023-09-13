@@ -18,6 +18,9 @@ import (
 
 func main() {
 	os.Setenv("parent_foo", "parent_bar")
+
+	fmt.Println("Case1: Basic, connect, close from the worker")
+
 	var stdout, stderr bytes.Buffer
 	conn := &wasmww.WasmWebWorkerConn{
 		Name:   "hello",
@@ -44,6 +47,7 @@ func main() {
 	fmt.Printf("Control: Worker closed\n")
 
 	// Re-spwn
+	fmt.Println("Case2: Restart a closed conn, terminate the worker from outside")
 	conn.Env = []string{
 		"foo=bar",
 	}
@@ -66,6 +70,7 @@ func main() {
 	fmt.Printf("Control: Worker terminated\n")
 
 	// re-spawn again
+	fmt.Println("Case3: Redirect stdout/stderr")
 	if err := startHandle(conn); err != nil {
 		log.Fatal(err)
 	}
@@ -109,6 +114,7 @@ func main() {
 `, stderr.String())
 
 	//re-spawn and use Stdout/errPipe()
+	fmt.Println("Case4: Stdout/errPipe")
 	conn.Stdout = nil
 	conn.Stderr = nil
 	pipeOut, err := conn.StdoutPipe()

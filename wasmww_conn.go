@@ -205,8 +205,8 @@ func (conn *WasmWebWorkerConn) PostMessage(data safejs.Value, transfers []safejs
 
 // Terminate immediately terminates the Worker. Meanwhile, it stops the internal event loop, which makes the `Wait` to return.
 func (conn *WasmWebWorkerConn) Terminate() {
-	conn.closeFunc()
 	conn.ww.Terminate()
+	conn.closeFunc()
 }
 
 // EventChannel returns the channel that receives events sent from the Web Worker.

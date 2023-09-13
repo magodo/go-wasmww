@@ -23,6 +23,8 @@ func main() {
 		Name: "hello",
 		Path: "hello.wasm",
 	}
+
+	fmt.Println("Case1: Basic, connect, set stdout/stderr, close conn/worker from worker")
 	mgmtConn, err := conn1.Start()
 	if err != nil {
 		log.Fatal(err)
@@ -127,6 +129,7 @@ func main() {
 	printWorker(stdout, stderr)
 
 	// Re-spawn
+	fmt.Println("Case2: Start a closed conn, close conn/worker from outside, connect after close")
 	conn1.Env = []string{
 		"foo=bar",
 	}
@@ -166,11 +169,18 @@ func main() {
 	}
 	conn3.Wait()
 
-	// CLose the conn2 from the outside
+	// Close the conn2 from the outside
 	if err := conn2.Close(); err != nil {
 		log.Fatal(err)
 	}
 	conn2.Wait()
+	// Try to connect after closing
+	if err := conn2.Connect(); err != nil {
+		log.Fatal(err)
+	}
+	if err := conn2.PostMessage(safejs.Safe(js.ValueOf("connected after close")), nil); err != nil {
+		log.Fatal(err)
+	}
 
 	// Give some time to the worker to finish printing...
 	time.Sleep(time.Millisecond * 100)
@@ -187,6 +197,7 @@ func main() {
 	printWorker(stdout, stderr)
 
 	// Re-spawn again
+	fmt.Println("Case3: Close the worker from the worker with other conns active, which should gracefully notify these conns")
 	mgmtConn, err = conn1.Start()
 	if err != nil {
 		log.Fatal(err)
