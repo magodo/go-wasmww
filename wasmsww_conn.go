@@ -125,7 +125,6 @@ func (conn *WasmSharedWebWorkerConn) Connect() (err error) {
 		}
 		close(closeCh)
 		close(eventCh)
-		conn.ww = nil
 	}()
 	conn.closeFunc = func() error {
 		cancel()

@@ -134,8 +134,6 @@ func (conn *WasmWebWorkerConn) Start() (err error) {
 		for _, closer := range conn.pipes {
 			closer.Close()
 		}
-
-		conn.ww = nil
 	}()
 
 	conn.closeFunc = func() error {
