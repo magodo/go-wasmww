@@ -51,6 +51,7 @@ type msgWriterConsole struct{}
 func (msgWriterConsole) sealed() {}
 
 func (msgWriterConsole) Write(p []byte) (int, error) {
+	p = p[:len(p)-1] // throw the newline
 	js.Global().Get("console").Call("log", js.ValueOf(string(p)))
 	return len(p), nil
 }
@@ -70,7 +71,7 @@ func SetWriteSync(stdoutWriters, stderrWriters []MsgWriter) {
 			outputBuffer += js.Global().Get("TextDecoder").New("utf-8").Call("decode", buf).String()
 			nl := strings.LastIndex(outputBuffer, "\n")
 			if nl != -1 {
-				msg := outputBuffer[:nl]
+				msg := outputBuffer[:nl+1] // also write the newline (especially, the console writer will further throw it)
 				switch fd.Int() {
 				case 1:
 					for i, w := range stdoutWriters {
