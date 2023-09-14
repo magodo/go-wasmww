@@ -26,7 +26,7 @@ type msgWriterController struct {
 func (msgWriterController) sealed() {}
 
 func (w *msgWriterController) Write(p []byte) (int, error) {
-	if err := w.poster.PostMessage(safejs.Safe(js.ValueOf(w.prefix+string(p)+"\n")), nil); err != nil {
+	if err := w.poster.PostMessage(safejs.Safe(js.ValueOf(w.prefix+string(p))), nil); err != nil {
 		return 0, err
 	}
 	return len(p), nil
