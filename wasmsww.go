@@ -18,6 +18,7 @@ type WasmSharedWebWorker struct {
 	Name string
 
 	// Path is the path of the WASM to run as the Web Worker.
+	// This can be a relative path on the server, or an abosolute URL.
 	//
 	// This is ignored in the Connect().
 	Path string

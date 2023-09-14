@@ -4,8 +4,10 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
+	"syscall/js"
 	"text/template"
 )
 
@@ -32,6 +34,15 @@ func buildJS(args, env []string, path string, tpl []byte) (string, error) {
 
 	if len(env) == 0 {
 		env = os.Environ()
+	}
+
+	if uRL, err := url.ParseRequestURI(path); err != nil || !uRL.IsAbs() {
+		origin := js.Global().Get("location").Get("origin").String()
+		baseURL, err := url.ParseRequestURI(origin)
+		if err != nil {
+			return "", err
+		}
+		path = baseURL.JoinPath(path).String()
 	}
 
 	data := templateData{

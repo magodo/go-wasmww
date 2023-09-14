@@ -31,6 +31,7 @@ type WasmWebWorkerConn struct {
 	Name string
 
 	// Path is the path of the WASM to run as the Web Worker.
+	// This can be a relative path on the server, or an abosolute URL.
 	Path string
 
 	// Args holds command line arguments, including the WASM as Args[0].
